@@ -6,7 +6,7 @@ based on main_cell_attached_processing jupyter notebook
 @author: ilya kolb
 
 TODO
-    run this code in batch mode
+    run this code in batch mode (get rid of batch_reprocess_Recs, use flags to run)
     
     
 """
@@ -26,6 +26,9 @@ from utils import *
 froot = r'F:\ufGCaMP2pData\martonData\20200322-anm472004\cell4' # root dir with tiffs and ws file
 stimPrefix = "cell4_stim1_"
 wsFile = 'cell4_stim1_0001.h5'
+
+# other parameters
+neuropil_factor = 0.7 # F = F(cell) - neuropil_factor * F(neuropil)
 
 isDirFroot = os.path.isdir(froot)
 if not isDirFroot:
@@ -81,22 +84,22 @@ os.remove(os.path.join(froot, 'suite2p', 'ops1.npy')) # must remove ops.npy to m
 
 
 # 3 -- outlining cell from max intensity projection
-# ============================================================================
-
 
 scaledImg = (chan0maxIntensity - np.min(chan0maxIntensity)) / (np.max(chan0maxIntensity) - np.min(chan0maxIntensity))
 
 pd = PolygonDrawer("Polygon", scaledImg)
-mask = pd.run()
+(mask, neuropil_mask) = pd.run()
 
+neuropil_mask = neuropil_mask.astype(bool) # convert to boolean mask array
 mask = mask.astype(bool) # convert to boolean mask array
 
 
 print(str(np.shape(mask)))
 
 
-# save the mask
+# save the cell mask and neuropil mask
 np.save(os.path.join(froot, 'suite2p', 'plane0', 'mask' + stimPrefix + '.npy'), mask)
+np.save(os.path.join(froot, 'suite2p', 'plane0', 'neuropilmask' + stimPrefix + '.npy'), mask)
 
 # 4 -- mask off cell, get ftrace, load WS file
 
@@ -105,10 +108,13 @@ data_as_dict = ws.loadDataFile(filename=os.path.join(froot, wsFile), format_stri
 
 
 regImg_masked = chan0regImg[:,mask]
-ftrace = np.mean(regImg_masked, axis=1)
+regImg_neuropil_masked = chan0regImg[:,neuropil_mask]
 
+# formula: F = F(cell) - neuropil_factor * F(neuropil)
+f_cell = np.mean(regImg_masked, axis=1)
+f_neuropil = np.mean(regImg_neuropil_masked, axis=1)
+ftrace = f_cell - (neuropil_factor * f_neuropil)
 
-# to get analog channels scaled in float64 :
 
 sweep = data_as_dict['sweep_0001']
 voltage = sweep['analogScans'][0,:]

@@ -14,17 +14,34 @@ import cv2
 
 class PolygonDrawer(object):
 
-    FINAL_LINE_COLOR = (255, 255, 255)
-    WORKING_LINE_COLOR = (127, 127, 127)
-
-    def __init__(self, window_name, image):
+    FINAL_LINE_COLOR = (255, 0, 255)# (255, 255, 255)
+    BG_COLOR = (0, 255, 0)
+    
+    """
+    Interactive polygon-drawing GUI for identifying cell body and neuropil
+    INPUTS:
+            window_name: name of window (str)
+            inputImage: max projection image of cell
+            neuropilThickness: pixel thickness of neuropil around cell
+            neuropilOffset: pixel offset from neuropil
+            
+    RETURNS:
+            canvas: cell mask
+            canvas_neuropil: neuropil mask
+    """
+    def __init__(self, window_name, inputImage, neuropilThickness=10, neuropilOffset=3):
         self.window_name = window_name # Name for our window
+        self.CANVAS_SIZE = np.shape(inputImage)
+        
+        image = np.repeat(inputImage[:,:,np.newaxis], 3, axis=2)
         self.image = image
         self.done = False # Flag signalling we're done
         self.current = (0, 0) # Current position, so we can draw the line-in-progress
         self.points = [] # List of points defining our polygon
-        self.CANVAS_SIZE = np.shape(image)
-
+        
+        self.neuropilThickness = neuropilThickness
+        self.neuropilOffset = neuropilOffset
+        
     def on_mouse(self, event, x, y, buttons, user_param):
         # Mouse callback that gets called for every mouse event (i.e. moving, clicking, etc.)
 
@@ -46,7 +63,7 @@ class PolygonDrawer(object):
 
     def run(self):
         # Let's create our working window and set a mouse callback to handle events
-        cv2.namedWindow(self.window_name)
+        cv2.namedWindow(self.window_name, flags=cv2.WINDOW_NORMAL)
         # cv2.imshow(self.window_name, np.zeros(CANVAS_SIZE, np.uint8))
         cv2.imshow(self.window_name, self.image)
         cv2.waitKey(1)
@@ -61,22 +78,31 @@ class PolygonDrawer(object):
                 # Draw all the current polygon segments
                 cv2.polylines(canvas, np.array([self.points]), False, self.FINAL_LINE_COLOR, 1)
                 # And  also show what the current segment would look like
-                cv2.line(canvas, self.points[-1], self.current, self.WORKING_LINE_COLOR)
+                # cv2.line(canvas, self.points[-1], self.current, self.WORKING_LINE_COLOR)
             # Update the window
             cv2.imshow(self.window_name, canvas)
             # And wait 50ms before next iteration (this will pump window messages meanwhile)
             if cv2.waitKey(50) == 27: # ESC hit
                 self.done = True
 
-        # User finised entering the polygon points, so let's make the final drawing
+        # User finised entering the polygon points, so let's make the final drawing of a filled polygon
         canvas = np.zeros(self.CANVAS_SIZE, np.uint8)
-        # of a filled polygon
+        canvas_neuropil = np.zeros(self.CANVAS_SIZE, np.uint8)
+        canvas_neuropil_offset = np.zeros(self.CANVAS_SIZE, np.uint8)
+        
         if (len(self.points) > 0):
             cv2.fillPoly(canvas, np.array([self.points]), self.FINAL_LINE_COLOR)
+            
+            # cv2.fillPoly(canvas_neuropil, np.array([self.points]), self.FINAL_LINE_COLOR, offset=(20,20))
+            cv2.polylines(canvas_neuropil, np.array([self.points]), True, self.FINAL_LINE_COLOR, thickness=self.neuropilThickness)
+            cv2.polylines(canvas_neuropil_offset, np.array([self.points]), True, self.FINAL_LINE_COLOR, thickness=self.neuropilOffset) # offset 
+            
+            canvas_neuropil = canvas_neuropil - canvas - canvas_neuropil_offset
         # And show it
-        cv2.imshow(self.window_name, canvas)
+        #cv2.imshow(self.window_name, canvas)
+        cv2.imshow(self.window_name, np.concatenate((canvas, canvas_neuropil), axis=0))
         # Waiting for the user to press any key
         cv2.waitKey()
 
         cv2.destroyAllWindows()
-        return canvas
+        return (canvas, canvas_neuropil)

@@ -12,7 +12,7 @@ TODO:
     generate and save dicts for 1AP, 2AP, etc
     generate F_params dict for each AP where df/f, taus etc are calculated
     enable running in batch mode
-    AP 
+    
 @author: labadmin
 """
 
@@ -40,7 +40,7 @@ batch = [[r'F:\ufGCaMP2pData\martonData\20200322-anm472004\cell3', 'cell3_stim1'
 #%%
 # conditioning F and V traces
 
-b = batch[2]
+b = batch[10]
 print('ANALYZING NEW BATCH: ' + str(b))
 
 froot = b[0]
@@ -161,12 +161,19 @@ for i in range(len(APlists[0])):
             t_v_segment = (t_idx + np.arange(-1*thresh_samples_v, thresh_samples_v)).astype(int)
             t_v_segment_s = (t_v_segment - np.min(t_v_segment))/sRate_v
             
-            ax1.plot(t_v_segment_s, v_filt[t_v_segment])
+            v_segment = v_filt[t_v_segment]
+            ax1.plot(t_v_segment_s, v_segment)
             
             f_idx = np.argmin(np.abs(tArray_F - t)) # find closest frame to AP index
             t_f_segment = (f_idx + np.arange(-1*thresh_samples_f, thresh_samples_f)).astype(int)
             t_f_segment_s = (t_f_segment - np.min(t_f_segment))/sRate_F
             
-            ax2.plot(t_f_segment_s, F[t_f_segment])
+            F_segment = F[t_f_segment]
+            ax2.plot(t_f_segment_s, F_segment)
             plt.show()
-            # plt.plot()
+            
+            # populate bucketAP1, bucketAP2, ..., bucketAP8 here
+            
+            # calculate F parameters here
+            # Fparams = calcFparams(v_segment, F_segment, sRate_v, sRate_F)
+            
