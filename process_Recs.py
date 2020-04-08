@@ -23,10 +23,13 @@ from polygondrawer import PolygonDrawer
 from utils import *
 
 # 1 -- input animal, cell, stim number, run suite2p
-froot = r'F:\ufGCaMP2pData\martonData\20200322-anm472004\cell4' # root dir with tiffs and ws file
-stimPrefix = "cell4_stim1_"
-wsFile = 'cell4_stim1_0001.h5'
+b = [r'F:\ufGCaMP2pData\martonData\20200322-anm472004\cell5', 'cell5_stim11_', 'cell5_stim11_0001.h5']
+froot = b[0] # r'F:\ufGCaMP2pData\martonData\20200322-anm472004\cell3' # root dir with tiffs and ws file
+stimPrefix = b[1] #"cell3_stim2"
+wsFile = b[2] # 'cell3_stim2_0001.h5'
 
+currentBatch = [froot, stimPrefix, wsFile]
+print(currentBatch)
 # other parameters
 neuropil_factor = 0.7 # F = F(cell) - neuropil_factor * F(neuropil)
 
@@ -151,7 +154,8 @@ elif len(tArray_F) < len(ftrace):
 plt.plot(tArray_F, norm0To1(ftrace))
 plt.show()
 
-
 # save voltage, ftrace, mask, maybe other variables?
 cell_dict = {'tArray': tArray, 'voltage': voltage, 'tArray_F': tArray_F, 'ftrace': ftrace}
 np.save(os.path.join(froot, 'suite2p', 'plane0', 'cell_dict_' + stimPrefix + '.npy'), cell_dict)
+
+print(currentBatch)

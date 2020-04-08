@@ -4,7 +4,7 @@ Created on Tue Apr  7 18:51:00 2020
  
 Utility functions for processing cell attached + 2P recordings
 
-@author: labadmin
+@author: kolbi
 """
 
 """
@@ -25,11 +25,17 @@ def hpFilter(sig, HPfreq, order, sRate):
     return signal.sosfilt(sos, sig)
     
 """
-v: voltage trace
-sRate: sampling rate
-cut_s: cut seconds from [start end] of the recording due to artifacts, edge effects
+findAPs: identify APs in voltage trace
+@inputs:
+        v: voltage trace
+        sRate: sampling rate
+        cut_s: cut seconds from [start end] of the recording due to artifacts, edge effects
 
-RETURNS: peak indices
+@outputs:
+        peak indices
+
+@todo:
+        determine min peak height based on SNR
 """
 def findAPs(v, sRate, cut_s=[0.1, 1]):
     peaks_, _ = signal.find_peaks(v, height=1, distance=100)
