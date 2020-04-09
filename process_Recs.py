@@ -18,7 +18,6 @@ import matplotlib.pyplot as plt
 import glob, os, warnings
 from suite2p import run_s2p
 from pywavesurfer import ws
-from scipy.signal import find_peaks
 from polygondrawer import PolygonDrawer
 from utils import *
 
@@ -129,11 +128,8 @@ tArray = np.arange(len(voltage))/sRate
 plt.figure(figsize=[10,4])
 plt.plot(tArray, norm0To1(voltage))
 
-# extract frame occurences from frames array
-frames_diff = np.diff(frames) > 1
-
-# find peaks in diff array to get frame indices
-peaks, _ = find_peaks(frames_diff, height=.5, distance=100)
+# get frame indices
+peaks = getEdges(frames)
 
 imgFrateRate = sRate / np.mean(np.diff(peaks))
 
