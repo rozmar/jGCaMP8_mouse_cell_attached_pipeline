@@ -21,12 +21,18 @@ def norm0To1(x):
  
 
 
-def hpFilter(sig, HPfreq, order, sRate):
+def hpFilter(sig, HPfreq, order, sRate, padding = True):
     """
     High pass filter
+    -enable padding to avoid edge artefact
     """
     sos = signal.butter(order, HPfreq, 'hp', fs=sRate, output='sos')
-    return signal.sosfilt(sos, sig)
+    if padding: 
+        sig_out = signal.sosfilt(sos, np.concatenate([sig[::-1],sig,sig[::-1]]))
+        sig_out = sig_out[len(sig):-len(sig)]
+    else:
+        sig_out = signal.sosfilt(sos, sig)
+    return sig_out
     
 
 def findAPs(v, sRate, cut_s=[0.1, 1]):
