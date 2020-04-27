@@ -84,7 +84,9 @@ def findAPs(v, sRate, SN_min = 10,refracter_period = 1):
             peak indices
             peak SNR
     """
-    #%
+    #%%
+    v_orig = v.copy()
+    v=np.diff(v)*sRate
     window = int(sRate*.1)
     step=int(window/2)
     starts = np.arange(0,len(v)-window,step)
@@ -95,7 +97,7 @@ def findAPs(v, sRate, SN_min = 10,refracter_period = 1):
     stds_roll = rollingfun(stds_roll,500,'mean')
     #%
     v_scaled = np.copy(v)
-    noise_level = np.ones(len(v))
+    noise_level = np.ones(len(v)+1)
     for start,std in zip(starts,stds_roll):
         v_scaled[start:start+window]=v[start:start+window]/std
         noise_level[start:start+window]=std
@@ -108,10 +110,21 @@ def findAPs(v, sRate, SN_min = 10,refracter_period = 1):
     needed_spikes = (snr>snr_rolling*.2) & (snr<snr_rolling*5)
     peaks_=peaks_[needed_spikes]
     snr =snr[needed_spikes]
+    peaks_v = list()
+    for peak_dv in peaks_:
+        peaks_v.append(peak_dv+np.argmax(v_orig[peak_dv:int(.001*sRate)+peak_dv]))
     #%%
-    return peaks_, snr, noise_level
+    return peaks_v, snr, noise_level
+    
+def AP_times_to_rate(AP_time,firing_rate_window=2,frbinwidth = 0.01):
 
-
+    fr_kernel = np.ones(int(firing_rate_window/frbinwidth))/(firing_rate_window/frbinwidth)
+    fr_bincenters = np.arange(frbinwidth/2,np.max(AP_time)+frbinwidth,frbinwidth)
+    fr_binedges = np.concatenate([fr_bincenters-frbinwidth/2,[fr_bincenters[-1]+frbinwidth/2]])
+    fr_e = np.histogram(AP_time,fr_binedges)[0]/frbinwidth
+    fr_e = np.convolve(fr_e, fr_kernel,'same')
+    
+    return fr_e, fr_bincenters
 
 def getEdges(sig, minDist_samples = 50, diffThresh = 1, edge = 'positive'):
     """
