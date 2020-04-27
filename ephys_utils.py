@@ -5,7 +5,7 @@ import utils
 from matplotlib import cm as colormap
 
 #%% if __name__ == "__main__":
-def extract_tuning_curve(WS_path = './test/testWS.h5',vis_path = './test/test.mat',plot_data=False):
+def extract_tuning_curve(WS_path = './test/testWS.h5',vis_path = './test/test.mat',plot_data=False,plot_title = None):
     #%%
 # =============================================================================
 #     WS_path = './test/testWS.h5'
@@ -15,6 +15,7 @@ def extract_tuning_curve(WS_path = './test/testWS.h5',vis_path = './test/test.ma
     vis = utils.processVisMat(vis_path)
     ws_data = ws.loadDataFile(filename=WS_path, format_string='double' )
     
+    units = np.array(ws_data['header']['AIChannelUnits']).astype(str)
     channelnames = np.array(ws_data['header']['AIChannelNames']).astype(str)
     ephysidx = (channelnames == 'Voltage').argmax()
     framatimesidx = (channelnames == 'FrameTrigger').argmax()
@@ -22,6 +23,9 @@ def extract_tuning_curve(WS_path = './test/testWS.h5',vis_path = './test/test.ma
     sweep = ws_data['sweep_0001']
     sRate = ws_data['header']['AcquisitionSampleRate'][0][0]
     voltage = sweep['analogScans'][ephysidx,:]
+    if units[ephysidx] == 'mV':
+        voltage =voltage/1000
+        units[ephysidx] = 'V'
     frame_trigger = sweep['analogScans'][framatimesidx,:]
     
     # get frame indices
@@ -35,11 +39,12 @@ def extract_tuning_curve(WS_path = './test/testWS.h5',vis_path = './test/test.ma
         raise ValueError('Number of frames in WS file (' + str(nFrames_ws) + ') does not match num frames in MAT file (' + str(nFrames_vis) + ')')
     
     t_ephys = np.arange(len(voltage))/sRate
-    v_filt = utils.hpFilter(voltage, 10, 1, sRate)
-    v_filt = utils.gaussFilter(v_filt,sRate,sigma = .00005)
+    #
+    v_filt = utils.gaussFilter(voltage,sRate,sigma = .00005)
     #%
     # AP indices in voltage trace
     AP_idx,AP_snr,noise_level = utils.findAPs(v_filt, sRate)
+    v_filt = utils.hpFilter(v_filt, 10, 1, sRate)
     AP_time = t_ephys[AP_idx]
     
     angle = vis['angle']
@@ -87,18 +92,21 @@ def extract_tuning_curve(WS_path = './test/testWS.h5',vis_path = './test/test.ma
         ap_time_back = .003
         ap_time_forward = .005
         cmap = colormap.get_cmap('jet')
-        frbinwidth = 0.01
-        firing_rate_window = 2
         
         
         ap_step_back = int(sRate*ap_time_back)
         ap_step_forward = int(sRate*ap_time_forward)
         ap_time = np.arange(-ap_step_back,ap_step_forward)/sRate*1000
-        fr_kernel = np.ones(int(firing_rate_window/frbinwidth))/(firing_rate_window/frbinwidth)
-        fr_bincenters = np.arange(frbinwidth/2,np.max(t_ephys)+frbinwidth,frbinwidth)
-        fr_binedges = np.concatenate([fr_bincenters-frbinwidth/2,[fr_bincenters[-1]+frbinwidth/2]])
-        fr_e = np.histogram(AP_time,fr_binedges)[0]/frbinwidth
-        fr_e = np.convolve(fr_e, fr_kernel,'same')
+        
+# =============================================================================
+#         fr_kernel = np.ones(int(firing_rate_window/frbinwidth))/(firing_rate_window/frbinwidth)
+#         fr_bincenters = np.arange(frbinwidth/2,np.max(t_ephys)+frbinwidth,frbinwidth)
+#         fr_binedges = np.concatenate([fr_bincenters-frbinwidth/2,[fr_bincenters[-1]+frbinwidth/2]])
+#         fr_e = np.histogram(AP_time,fr_binedges)[0]/frbinwidth
+#         fr_e = np.convolve(fr_e, fr_kernel,'same')
+# =============================================================================
+        
+        fr_e, fr_bincenters = utils.AP_times_to_rate(AP_time,firing_rate_window=2,frbinwidth = 0.01)
         
         frame_times = t_ephys[frame_idx]
         stim_start_t = frame_times[stim_init_samples]
@@ -107,7 +115,7 @@ def extract_tuning_curve(WS_path = './test/testWS.h5',vis_path = './test/test.ma
         ax_raw = fig.add_subplot(421)
         ax_raw.plot(t_ephys, v_filt,'k-') # plot v trace
         ax_raw.plot(AP_time, v_filt[AP_idx], 'ro',alpha = .5) # show peaks
-        ax_raw.set_ylabel('mV')
+        ax_raw.set_ylabel(units[ephysidx])
         ax_raw.set_xlim([t_ephys[0],t_ephys[-1]])
         ax_raw.set_xlabel('time (s)')
         
@@ -157,7 +165,9 @@ def extract_tuning_curve(WS_path = './test/testWS.h5',vis_path = './test/test.ma
         ax_ap.set_xlim([ap_time[0],ap_time[-1]])
         ax_ap.set_ylabel('mV')
         ax_ap.set_xlabel('ms')
-        
+        if plot_title:
+            ax_raw.set_title(plot_title)
+            
         plt.show()
     
     outdata = {'uniqueAngles':uniqueAngles,
@@ -166,7 +176,11 @@ def extract_tuning_curve(WS_path = './test/testWS.h5',vis_path = './test/test.ma
                'totalSpikes':totalSpikes,
                'meanSpikes':meanSpikes,
                'totalSpikes_baseline':totalSpikes_baseline,
-               'meanSpikes_baseline':meanSpikes_baseline}
+               'meanSpikes_baseline':meanSpikes_baseline,
+               'ephys_t':t_ephys,
+               'ephys_v_filt':v_filt,
+               'ap_idx':AP_idx,
+               'frame_times':t_ephys[frame_idx]}
     
     
  #%%   
