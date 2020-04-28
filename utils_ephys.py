@@ -5,6 +5,16 @@ import utils
 from matplotlib import cm as colormap
 
 #%% if __name__ == "__main__":
+def AP_times_to_rate(AP_time,firing_rate_window=2,frbinwidth = 0.01):
+
+    fr_kernel = np.ones(int(firing_rate_window/frbinwidth))/(firing_rate_window/frbinwidth)
+    fr_bincenters = np.arange(frbinwidth/2,np.max(AP_time)+frbinwidth,frbinwidth)
+    fr_binedges = np.concatenate([fr_bincenters-frbinwidth/2,[fr_bincenters[-1]+frbinwidth/2]])
+    fr_e = np.histogram(AP_time,fr_binedges)[0]/frbinwidth
+    fr_e = np.convolve(fr_e, fr_kernel,'same')
+    
+    return fr_e, fr_bincenters
+
 def extract_tuning_curve(WS_path = './test/testWS.h5',vis_path = './test/test.mat',plot_data=False,plot_title = None):
     #%%
 # =============================================================================
@@ -106,7 +116,7 @@ def extract_tuning_curve(WS_path = './test/testWS.h5',vis_path = './test/test.ma
 #         fr_e = np.convolve(fr_e, fr_kernel,'same')
 # =============================================================================
         
-        fr_e, fr_bincenters = utils.AP_times_to_rate(AP_time,firing_rate_window=2,frbinwidth = 0.01)
+        fr_e, fr_bincenters = AP_times_to_rate(AP_time,firing_rate_window=2,frbinwidth = 0.01)
         
         frame_times = t_ephys[frame_idx]
         stim_start_t = frame_times[stim_init_samples]
