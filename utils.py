@@ -132,7 +132,7 @@ def getEdges(sig, minDist_samples = 50, diffThresh = 1, edge = 'positive'):
         indices of edges
     """
     # take diff of signal and threshold it
-    sig_diff = (np.diff(sig) > diffThresh) if edge is 'positive' else (np.diff(sig) > -1*diffThresh)
+    sig_diff = (np.diff(sig) > diffThresh) if edge == 'positive' else (np.diff(sig) < -1*diffThresh)
     
     # find peaks in diff array to get indices
     peaks, _ = signal.find_peaks(sig_diff, height=diffThresh/2, distance=minDist_samples)
