@@ -15,6 +15,7 @@ import scipy.ndimage as ndimage
 import numpy as np
 
 
+
 def rollingfun(y, window = 10, func = 'mean'):
     """
     rollingfun
@@ -116,15 +117,7 @@ def findAPs(v, sRate, SN_min = 10,refracter_period = 1):
     #%%
     return peaks_v, snr, noise_level
     
-def AP_times_to_rate(AP_time,firing_rate_window=2,frbinwidth = 0.01):
 
-    fr_kernel = np.ones(int(firing_rate_window/frbinwidth))/(firing_rate_window/frbinwidth)
-    fr_bincenters = np.arange(frbinwidth/2,np.max(AP_time)+frbinwidth,frbinwidth)
-    fr_binedges = np.concatenate([fr_bincenters-frbinwidth/2,[fr_bincenters[-1]+frbinwidth/2]])
-    fr_e = np.histogram(AP_time,fr_binedges)[0]/frbinwidth
-    fr_e = np.convolve(fr_e, fr_kernel,'same')
-    
-    return fr_e, fr_bincenters
 
 def getEdges(sig, minDist_samples = 50, diffThresh = 1, edge = 'positive'):
     """
@@ -190,3 +183,5 @@ def processVisMat(vis_mat_path):
     vis['trials'] = mat[10]
     
     return vis
+
+
