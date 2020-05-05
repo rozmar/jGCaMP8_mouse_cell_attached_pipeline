@@ -1,4 +1,4 @@
-from ephys_utils import extract_tuning_curve
+from utils_ephys import extract_tuning_curve
 import utils
 import os
 import numpy as np
@@ -15,12 +15,12 @@ ephys_basedir = '/home/rozmar/Data/Calcium_imaging/raw/Genie_2P_rig/rozsam'
 vis_stim_basedir = '/home/rozmar/Data/Visual_stim/raw/Genie_2P_rig'
 suite2p_basedir = '/home/rozmar/Data/Calcium_imaging/suite2p/Genie_2P_rig/rozsam'
 
-session = '20200418'
-subject = '471997'
+session = '20200322'
+subject = '472004'
 cell = '5'
-runnum = [3] # visual stimulus number needed
-roi_num = [2] # suite2p roi number
-plot_suite2p_output = True
+runnum = [4] # visual stimulus number needed
+roi_num = [0] # suite2p roi number
+plot_suite2p_output = False
 F0win = 20 #s
 F_filter_sigma = .01 #seconds
 neu_r =.7
@@ -102,13 +102,47 @@ for stim,ephysfile in zip(stimnums,ephysfiles_real):
                                 
                                 F_orig = F.copy()
                                 Fneu_orig = Fneu.copy()
+                                
+                                # - ------ calculate r
+                                AP_times = data_now['ephys_t'][data_now['ap_idx']]
+                                frametimes = data_now['frame_times']
+                                decay_time = 4 #s
+                                decay_step = int(decay_time*framerate)
+                                F_activity = np.zeros(len(frametimes))
+                                for ap_time in AP_times:
+                                    F_activity[np.argmax(frametimes>ap_time)] = 1
+                                F_activitiy_conv= np.convolve(F_activity,np.concatenate([np.zeros(decay_step),np.ones(decay_step)]),'same')
+                                F_activitiy_conv[:decay_step]=1
+                                needed =F_activitiy_conv==0
+                                F_orig_filt = utils.gaussFilter(F_orig,framerate,sigma = F_filter_sigma)
+                                Fneu_orig_filt = utils.gaussFilter(Fneu_orig,framerate,sigma = F_filter_sigma)
+                                p=np.polyfit(Fneu_orig_filt[needed],F_orig_filt[needed],1)
+                                neu_r = p[0]
+                                
+# =============================================================================
+#                                 neuropilvals = np.asarray([np.min(Fneu_orig_filt[needed]),np.max(Fneu_orig_filt[needed])])
+#                                 fittedvals = np.polyval(p,neuropilvals)
+#                                 
+#                                 plt.plot(Fneu_orig_filt[needed],F_orig_filt[needed],'ko')
+#                                 plt.plot(neuropilvals,fittedvals,'r-')
+#                                 plt.title(p)
+#                                 plt.ylabel('F')
+#                                 plt.xlabel('neuropil')
+# =============================================================================
+                                # - ------ calculate r
+                                
+                                
                                 F = utils.gaussFilter(F,framerate,sigma = F_filter_sigma)
                                 Fneu = utils.gaussFilter(Fneu,framerate,sigma = F_filter_sigma)
                                 F_corr = F-Fneu*neu_r
+                                p=np.polyfit(F_corr,utils.gaussFilter(F,framerate,sigma = F_filter_sigma),1)
+                                F_corr =F_corr +p[1]
+                                # correct neuropil fluctuations
+                                
                                 
                                 F0 = utils.rollingfun(F_corr, window = F0step, func = 'min')
                                 F0 = utils.rollingfun(F0, window = int(F0step*1), func = 'max')
-                                dFF = (F-F0)/F0
+                                dFF = (F_corr-F0)/F0
                                 #s2p_metadata = np.load(os.path.join(suite2p_movie_path,'ops.npy')).tolist()
                                 #%
                                 xlims= [np.min(data_now['ephys_t']),np.max(data_now['ephys_t'])]
@@ -122,7 +156,7 @@ for stim,ephysfile in zip(stimnums,ephysfiles_real):
                                 ax_raw.plot(data_now['frame_times'],F_orig,'k-')
                                 ax_raw.plot(data_now['frame_times'],Fneu_orig,'r-')
                                 
-                                ax_img.plot(data_now['frame_times'],F_corr,'g-')
+                                ax_img.plot(data_now['frame_times'],F_corr,'g-',lw=2)
                                 ax_img.plot(data_now['frame_times'],F0,'k-')
                                 #ax_img.plot(data_now['ephys_t'][data_now['ap_idx']],np.ones(len(data_now['ap_idx']))*np.min(F),'r|')
                                 
@@ -130,7 +164,7 @@ for stim,ephysfile in zip(stimnums,ephysfiles_real):
                                 ax_dff.plot(data_now['ephys_t'][data_now['ap_idx']],np.ones(len(data_now['ap_idx']))*np.max(dFF)*-0.1,'r|')
                                 ax_ephys.plot(data_now['ephys_t'],data_now['ephys_v_filt'],'k-')
                                 
-                                fr_e, fr_bincenters = utils.AP_times_to_rate(data_now['ephys_t'][data_now['ap_idx']],firing_rate_window=1)
+                                fr_e, fr_bincenters = utils_ephys.AP_times_to_rate(data_now['ephys_t'][data_now['ap_idx']],firing_rate_window=1)
                                 ax_rate.plot(fr_bincenters,fr_e,'r-')
                                 
                                 
@@ -159,6 +193,7 @@ for stim,ephysfile in zip(stimnums,ephysfiles_real):
 stim_ap_dict_orig = stim_ap_dict.copy()        
 baseline_ap_dict_orig = baseline_ap_dict.copy()   
 #%%
+plt.figure()
 stim_ap_dict = stim_ap_dict_orig.copy()        
 baseline_ap_dict = baseline_ap_dict_orig.copy()        
 maxlength = 0
@@ -176,5 +211,9 @@ df_baseline = pd.DataFrame(baseline_ap_dict)
 df_apdiff = df_stim-df_baseline
 #%
 sns.swarmplot(data=df_apdiff,color='k')
-#plt.errorbar(df_apdiff.keys(),df_apdiff.mean(skipna=True),df_apdiff.std(skipna=True),color='red',linewidth=4)
+plt.errorbar(df_apdiff.keys(),df_apdiff.mean(skipna=True),df_apdiff.std(skipna=True),color='red',linewidth=4)
+plt.xlabel('Angle')
+plt.ylabel('Firing rate change')
 plt.show()
+
+#%%
