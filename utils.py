@@ -24,6 +24,7 @@ def rollingfun(y, window = 10, func = 'mean'):
     @input:
         y = array, window, function (mean,min,max,std)
     """
+    
     y = np.concatenate([y[window::-1],y,y[:-1*window:-1]])
     ys = list()
     for idx in range(window):    
@@ -73,7 +74,7 @@ def gaussFilter(sig,sRate,sigma = .00005):
     return sig_f
     
 
-def findAPs(v, sRate, SN_min = 10,refracter_period = 1):
+def findAPs(v, sRate, SN_min = 10,refracter_period = 1,method = 'diff'):
     """
     findAPs: identify APs in voltage trace
     @inputs:
@@ -86,34 +87,54 @@ def findAPs(v, sRate, SN_min = 10,refracter_period = 1):
             peak SNR
     """
     #%%
-    v_orig = v.copy()
-    v=np.diff(v)*sRate
-    window = int(sRate*.1)
-    step=int(window/2)
-    starts = np.arange(0,len(v)-window,step)
-    stds = list()
-    for start in starts:
-        stds.append(np.std(v[start:start+window]))
-    stds_roll = rollingfun(stds,100,'min')
-    stds_roll = rollingfun(stds_roll,500,'mean')
-    #%
-    v_scaled = np.copy(v)
-    noise_level = np.ones(len(v)+1)
-    for start,std in zip(starts,stds_roll):
-        v_scaled[start:start+window]=v[start:start+window]/std
-        noise_level[start:start+window]=std
-    v_scaled[start:]=v[start:]/std
-    noise_level[start:]=std
-    peaks_, properties = signal.find_peaks(v_scaled,height = SN_min, distance=int((refracter_period/1000)*sRate))
-    snr = properties['peak_heights']
-    # ignore suspiciuously low or high 'spikes'
-    snr_rolling = rollingfun(snr, window = 5, func = 'median')
-    needed_spikes = (snr>snr_rolling*.2) & (snr<snr_rolling*5)
-    peaks_=peaks_[needed_spikes]
-    snr =snr[needed_spikes]
-    peaks_v = list()
-    for peak_dv in peaks_:
-        peaks_v.append(peak_dv+np.argmax(v_orig[peak_dv:int(.001*sRate)+peak_dv]))
+    if method == 'diff':
+        v_orig = v.copy()
+        v=np.diff(v)*sRate
+        window = int(sRate*.1)
+        step=int(window/2)
+        starts = np.arange(0,len(v)-window,step)
+        stds = list()
+        for start in starts:
+            stds.append(np.std(v[start:start+window]))
+        stds_roll = rollingfun(stds,100,'min')
+        stds_roll = rollingfun(stds_roll,500,'mean')
+        #%
+        v_scaled = np.copy(v)
+        noise_level = np.ones(len(v)+1)
+        for start,std in zip(starts,stds_roll):
+            v_scaled[start:start+window]=v[start:start+window]/std
+            noise_level[start:start+window]=std
+        v_scaled[start:]=v[start:]/std
+        noise_level[start:]=std
+        peaks_, properties = signal.find_peaks(v_scaled,height = SN_min, distance=int((refracter_period/1000)*sRate))
+        snr = properties['peak_heights']
+        # ignore suspiciuously low or high 'spikes'
+        if len(peaks_)>10:
+            snr_rolling = rollingfun(snr, window = 5, func = 'median')
+            needed_spikes = (snr>snr_rolling*.1) & (snr<snr_rolling*10)
+            peaks_=peaks_[needed_spikes]
+            snr =snr[needed_spikes]
+        peaks_v = list()
+        for peak_dv in peaks_:
+            peaks_v.append(peak_dv+np.argmax(v_orig[peak_dv:int(.001*sRate)+peak_dv]))
+    else:
+        window = int(sRate*10)
+        step=int(window/2)
+        starts = np.arange(0,len(v)-window,step)
+        stds = list()
+        for start in starts:
+            stds.append(np.median(np.abs((v[start:start+window]))/.6745))
+        #%
+        v_scaled = np.copy(v)
+        noise_level = np.ones(len(v))
+        for start,std in zip(starts,stds):
+            v_scaled[start:start+window]=v[start:start+window]/std
+            noise_level[start:start+window]=std
+        v_scaled[start:]=v[start:]/std
+        noise_level[start:]=std
+        peaks_v, properties = signal.find_peaks(v_scaled,height = SN_min, distance=int((refracter_period/1000)*sRate))
+        snr = properties['peak_heights']
+        
     #%%
     return peaks_v, snr, noise_level
     
