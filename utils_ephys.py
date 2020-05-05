@@ -1,10 +1,33 @@
+
 import matplotlib.pyplot as plt
 import numpy as np
 from pywavesurfer import ws
 import utils
 from matplotlib import cm as colormap
 
-#%% if __name__ == "__main__":
+def load_wavesurfer_file(WS_path):
+    #%%
+    ws_data = ws.loadDataFile(filename=WS_path, format_string='double' )
+    units = np.array(ws_data['header']['AIChannelUnits']).astype(str)
+    channelnames = np.array(ws_data['header']['AIChannelNames']).astype(str)
+    if 'Voltage' in channelnames:
+        ephysidx = (channelnames == 'Voltage').argmax()
+        recording_mode = 'CC'
+    else:
+        ephysidx = (channelnames == 'Current').argmax()
+        recording_mode = 'VC'
+    framatimesidx = (channelnames == 'FrameTrigger').argmax()
+    
+    sweep = ws_data['sweep_0001']
+    sRate = ws_data['header']['AcquisitionSampleRate'][0][0]
+    voltage = sweep['analogScans'][ephysidx,:]
+    if units[ephysidx] == 'mV':
+        voltage =voltage/1000
+        units[ephysidx] = 'V'
+    frame_trigger = sweep['analogScans'][framatimesidx,:]
+    #%%
+    return voltage, frame_trigger, sRate, recording_mode
+    
 def AP_times_to_rate(AP_time,firing_rate_window=2,frbinwidth = 0.01):
 
     fr_kernel = np.ones(int(firing_rate_window/frbinwidth))/(firing_rate_window/frbinwidth)
@@ -23,27 +46,23 @@ def extract_tuning_curve(WS_path = './test/testWS.h5',vis_path = './test/test.ma
 #     plot_data = True
 # =============================================================================
     vis = utils.processVisMat(vis_path)
-    ws_data = ws.loadDataFile(filename=WS_path, format_string='double' )
-    
-    units = np.array(ws_data['header']['AIChannelUnits']).astype(str)
-    channelnames = np.array(ws_data['header']['AIChannelNames']).astype(str)
-    ephysidx = (channelnames == 'Voltage').argmax()
-    framatimesidx = (channelnames == 'FrameTrigger').argmax()
-    
-    sweep = ws_data['sweep_0001']
-    sRate = ws_data['header']['AcquisitionSampleRate'][0][0]
-    voltage = sweep['analogScans'][ephysidx,:]
-    if units[ephysidx] == 'mV':
-        voltage =voltage/1000
-        units[ephysidx] = 'V'
-    frame_trigger = sweep['analogScans'][framatimesidx,:]
-    
+    voltage, frame_trigger, sRate, recording_mode =  load_wavesurfer_file(WS_path)
     # get frame indices
-    frame_idx = utils.getEdges(frame_trigger, minDist_samples=20, diffThresh=.02, edge = 'positive')
     
+    frame_idx_pos = utils.getEdges(frame_trigger, minDist_samples=20, diffThresh=.02, edge = 'positive')
+    frame_idx_neg = utils.getEdges(frame_trigger, minDist_samples=20, diffThresh=.02, edge = 'negative')
+    
+    if any(np.diff(frame_idx_pos)>2*np.median(np.diff(frame_idx_pos))): # frame triggers not belonging to the movie are removed
+        valid_framenum = np.argmax(np.diff(frame_idx_pos)>2*np.median(np.diff(frame_idx_pos)))+1
+        frame_idx_pos = frame_idx_pos[:valid_framenum]
+        frame_idx_neg = frame_idx_neg[:valid_framenum]
+    frame_idx = np.asarray(np.mean([frame_idx_pos,frame_idx_neg],0),dtype = int)
     # check to make sure num detected frames matches num frames in mat file
     nFrames_ws = len(frame_idx)
     nFrames_vis = vis['total_frames']
+    if nFrames_vis < nFrames_ws:
+        nFrames_ws = nFrames_vis
+        frame_idx = frame_idx[:nFrames_ws]
     if not (nFrames_ws == nFrames_vis):
         print('Number of frames in WS file (' + str(nFrames_ws) + ') does not match num frames in MAT file (' + str(nFrames_vis) + ')')
         raise ValueError('Number of frames in WS file (' + str(nFrames_ws) + ') does not match num frames in MAT file (' + str(nFrames_vis) + ')')
@@ -53,8 +72,13 @@ def extract_tuning_curve(WS_path = './test/testWS.h5',vis_path = './test/test.ma
     v_filt = utils.gaussFilter(voltage,sRate,sigma = .00005)
     #%
     # AP indices in voltage trace
-    AP_idx,AP_snr,noise_level = utils.findAPs(v_filt, sRate)
-    v_filt = utils.hpFilter(v_filt, 10, 1, sRate)
+    
+    if recording_mode=='VC':
+        AP_idx,AP_snr,noise_level = utils.findAPs(v_filt*-1, sRate,method ='diff')# 'quiroga'
+    else:
+        AP_idx,AP_snr,noise_level = utils.findAPs(v_filt, sRate,method ='diff')# 'quiroga'
+        v_filt = utils.hpFilter(v_filt, 10, 1, sRate)
+    
     AP_time = t_ephys[AP_idx]
     
     angle = vis['angle']
@@ -125,11 +149,11 @@ def extract_tuning_curve(WS_path = './test/testWS.h5',vis_path = './test/test.ma
         ax_raw = fig.add_subplot(421)
         ax_raw.plot(t_ephys, v_filt,'k-') # plot v trace
         ax_raw.plot(AP_time, v_filt[AP_idx], 'ro',alpha = .5) # show peaks
-        ax_raw.set_ylabel(units[ephysidx])
+        ax_raw.set_ylabel('V')
         ax_raw.set_xlim([t_ephys[0],t_ephys[-1]])
         ax_raw.set_xlabel('time (s)')
         
-        ax_rate = fig.add_subplot(422)
+        ax_rate = fig.add_subplot(422,sharex=ax_raw)
         ax_rate.plot(fr_bincenters, fr_e, 'k-')
         ax_rate.set_ylabel("Firing rate")
         for stim_start_t_now,a in zip(stim_start_t,angle):
@@ -142,7 +166,7 @@ def extract_tuning_curve(WS_path = './test/testWS.h5',vis_path = './test/test.ma
         ax_rate.set_xlim([t_ephys[0],t_ephys[-1]])
         ax_rate.set_xlabel('time (s)')
         
-        ax_snr = fig.add_subplot(423)
+        ax_snr = fig.add_subplot(423,sharex=ax_raw)
         ax_snr.plot(AP_time, AP_snr, 'ro',alpha = .5)
         ax_snr.set_ylabel('SNR')
         ax_snr.set_xlim([t_ephys[0],t_ephys[-1]])
@@ -167,13 +191,21 @@ def extract_tuning_curve(WS_path = './test/testWS.h5',vis_path = './test/test.ma
         ax_rel_spikes.set_xticks(uniqueAngles)
         
         ax_ap = fig.add_subplot(425)
+# =============================================================================
+#         offsetdiff = 5*(np.max(v_filt)-np.min(v_filt))/len(AP_idx)
+#         offset=0
+# =============================================================================
         for ap_idx_now in AP_idx:
+            
             try:
-                ax_ap.plot(ap_time,v_filt[ap_idx_now-ap_step_back:ap_idx_now+ap_step_forward])  
+                ax_ap.plot(ap_time,v_filt[ap_idx_now-ap_step_back:ap_idx_now+ap_step_forward],color=cmap(t_ephys[ap_idx_now]/t_ephys[-1]),alpha= np.max([.05,1-t_ephys[ap_idx_now]/t_ephys[-1]]) ) #
+# =============================================================================
+#                 offset -=offsetdiff
+# =============================================================================
             except:
                 pass
         ax_ap.set_xlim([ap_time[0],ap_time[-1]])
-        ax_ap.set_ylabel('mV')
+        ax_ap.set_ylabel('V')
         ax_ap.set_xlabel('ms')
         if plot_title:
             ax_raw.set_title(plot_title)
