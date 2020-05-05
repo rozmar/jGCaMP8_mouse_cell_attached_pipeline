@@ -4,9 +4,9 @@ import numpy as np
 from pywavesurfer import ws
 import utils
 from matplotlib import cm as colormap
-
+#%%
 def load_wavesurfer_file(WS_path):
-    #%%
+    #%
     ws_data = ws.loadDataFile(filename=WS_path, format_string='double' )
     units = np.array(ws_data['header']['AIChannelUnits']).astype(str)
     channelnames = np.array(ws_data['header']['AIChannelNames']).astype(str)
@@ -25,9 +25,9 @@ def load_wavesurfer_file(WS_path):
         voltage =voltage/1000
         units[ephysidx] = 'V'
     frame_trigger = sweep['analogScans'][framatimesidx,:]
-    #%%
+    #%
     return voltage, frame_trigger, sRate, recording_mode
-    
+    #%%
 def AP_times_to_rate(AP_time,firing_rate_window=2,frbinwidth = 0.01):
 
     fr_kernel = np.ones(int(firing_rate_window/frbinwidth))/(firing_rate_window/frbinwidth)
@@ -146,14 +146,14 @@ def extract_tuning_curve(WS_path = './test/testWS.h5',vis_path = './test/test.ma
         stim_start_t = frame_times[stim_init_samples]
         
         fig = plt.figure(figsize = [15,15])
-        ax_raw = fig.add_subplot(421)
+        ax_raw = fig.add_subplot(521)
         ax_raw.plot(t_ephys, v_filt,'k-') # plot v trace
         ax_raw.plot(AP_time, v_filt[AP_idx], 'ro',alpha = .5) # show peaks
         ax_raw.set_ylabel('V')
         ax_raw.set_xlim([t_ephys[0],t_ephys[-1]])
         ax_raw.set_xlabel('time (s)')
         
-        ax_rate = fig.add_subplot(422,sharex=ax_raw)
+        ax_rate = fig.add_subplot(522,sharex=ax_raw)
         ax_rate.plot(fr_bincenters, fr_e, 'k-')
         ax_rate.set_ylabel("Firing rate")
         for stim_start_t_now,a in zip(stim_start_t,angle):
@@ -166,7 +166,7 @@ def extract_tuning_curve(WS_path = './test/testWS.h5',vis_path = './test/test.ma
         ax_rate.set_xlim([t_ephys[0],t_ephys[-1]])
         ax_rate.set_xlabel('time (s)')
         
-        ax_snr = fig.add_subplot(423,sharex=ax_raw)
+        ax_snr = fig.add_subplot(523,sharex=ax_raw)
         ax_snr.plot(AP_time, AP_snr, 'ro',alpha = .5)
         ax_snr.set_ylabel('SNR')
         ax_snr.set_xlim([t_ephys[0],t_ephys[-1]])
@@ -176,29 +176,38 @@ def extract_tuning_curve(WS_path = './test/testWS.h5',vis_path = './test/test.ma
         ax_noiselevel.plot(t_ephys,noise_level,'k-')
         
         
-        ax_tot_spikes = fig.add_subplot(424)
+        ax_tot_spikes = fig.add_subplot(524)
         ax_tot_spikes.bar(uniqueAngles, totalSpikes, width=30,color = cmap(uniqueAngles/360) )
         ax_tot_spikes.set_xlabel("Angle")
         ax_tot_spikes.set_ylabel("Total num spikes")
         ax_tot_spikes.set_xticks(uniqueAngles)
         
         
-        ax_rel_spikes = fig.add_subplot(426)
+        ax_rel_spikes = fig.add_subplot(526)
         ax_rel_spikes.bar(uniqueAngles, meanSpikes-meanSpikes_baseline, width=30,color = cmap(uniqueAngles/360))
         ax_rel_spikes.plot(uniqueAngles,np.zeros(len(uniqueAngles)),'k-')
         ax_rel_spikes.set_xlabel("Angle")
         ax_rel_spikes.set_ylabel("mean AP num change")
         ax_rel_spikes.set_xticks(uniqueAngles)
         
-        ax_ap = fig.add_subplot(425)
+        ax_rel_spikes_divisive = fig.add_subplot(528)
+        ax_rel_spikes_divisive.bar(uniqueAngles, meanSpikes/meanSpikes_baseline, width=30,color = cmap(uniqueAngles/360))
+        ax_rel_spikes_divisive.plot(uniqueAngles,np.ones(len(uniqueAngles)),'k-')
+        ax_rel_spikes_divisive.set_xlabel("Angle")
+        ax_rel_spikes_divisive.set_ylabel("mean AP num fold-change")
+        ax_rel_spikes_divisive.set_xticks(uniqueAngles)
+        
+        ax_ap = fig.add_subplot(525)
 # =============================================================================
 #         offsetdiff = 5*(np.max(v_filt)-np.min(v_filt))/len(AP_idx)
 #         offset=0
 # =============================================================================
+        ap_matrix=list()
         for ap_idx_now in AP_idx:
             
             try:
                 ax_ap.plot(ap_time,v_filt[ap_idx_now-ap_step_back:ap_idx_now+ap_step_forward],color=cmap(t_ephys[ap_idx_now]/t_ephys[-1]),alpha= np.max([.05,1-t_ephys[ap_idx_now]/t_ephys[-1]]) ) #
+                ap_matrix.append(v_filt[ap_idx_now-ap_step_back:ap_idx_now+ap_step_forward])
 # =============================================================================
 #                 offset -=offsetdiff
 # =============================================================================
@@ -207,6 +216,11 @@ def extract_tuning_curve(WS_path = './test/testWS.h5',vis_path = './test/test.ma
         ax_ap.set_xlim([ap_time[0],ap_time[-1]])
         ax_ap.set_ylabel('V')
         ax_ap.set_xlabel('ms')
+        
+        ax_ap_2d = fig.add_subplot(527)
+        ax_ap_2d.imshow(ap_matrix,extent=[ap_time[0],ap_time[-1],len(ap_matrix),0],aspect='auto')
+        ax_ap_2d.set_ylabel('AP#')
+        ax_ap_2d.set_xlabel('ms')
         if plot_title:
             ax_raw.set_title(plot_title)
             
