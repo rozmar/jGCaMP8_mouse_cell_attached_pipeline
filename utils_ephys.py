@@ -6,11 +6,13 @@ import utils
 from matplotlib import cm as colormap
 #%%
 def load_wavesurfer_file(WS_path):
-    #%
+    #%%
     ws_data = ws.loadDataFile(filename=WS_path, format_string='double' )
     units = np.array(ws_data['header']['AIChannelUnits']).astype(str)
     channelnames = np.array(ws_data['header']['AIChannelNames']).astype(str)
-    if 'Voltage' in channelnames:
+    commandchannel = np.asarray(ws_data['header']['AOChannelNames'],str) =='Command'
+    commandunit = np.asarray(ws_data['header']['AOChannelUnits'],str)[np.where(commandchannel)[0][0]]
+    if 'A' in commandunit:
         ephysidx = (channelnames == 'Voltage').argmax()
         recording_mode = 'CC'
     else:
@@ -25,7 +27,7 @@ def load_wavesurfer_file(WS_path):
         voltage =voltage/1000
         units[ephysidx] = 'V'
     frame_trigger = sweep['analogScans'][framatimesidx,:]
-    #%
+    #%%
     return voltage, frame_trigger, sRate, recording_mode
     #%%
 def AP_times_to_rate(AP_time,firing_rate_window=2,frbinwidth = 0.01):
@@ -74,7 +76,8 @@ def extract_tuning_curve(WS_path = './test/testWS.h5',vis_path = './test/test.ma
     # AP indices in voltage trace
     
     if recording_mode=='VC':
-        AP_idx,AP_snr,noise_level = utils.findAPs(v_filt*-1, sRate,method ='diff')# 'quiroga'
+        v_filt = utils.hpFilter(v_filt, 10, 1, sRate)
+        AP_idx,AP_snr,noise_level = utils.findAPs(v_filt*-1, sRate,method ='quiroga')# 'quiroga'
     else:
         AP_idx,AP_snr,noise_level = utils.findAPs(v_filt, sRate,method ='diff')# 'quiroga'
         v_filt = utils.hpFilter(v_filt, 10, 1, sRate)
