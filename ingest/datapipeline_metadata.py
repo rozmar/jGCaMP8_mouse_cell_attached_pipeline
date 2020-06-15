@@ -2,13 +2,13 @@ import notebook_google.notebook_main as online_notebook
 from datetime import datetime, timedelta
 import pandas as pd
 import json
-import time as timer
+#import time as timer
 import numpy as np
 #% connect to server
 import datajoint as dj
 dj.conn()
-from pipeline import pipeline_tools
-from pipeline import lab, experiment
+#from pipeline import pipeline_tools
+from pipeline import lab#, experiment
 #%%
 def populatemetadata():
     #%% save metadata from google drive if necessairy
