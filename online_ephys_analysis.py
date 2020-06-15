@@ -9,13 +9,23 @@ import pandas as pd
 import re
 #%%
 
-ephys_basedir = '/home/rozmar/Network/Genie2Prig/imaging_ephys/rozsam'
-vis_stim_basedir = '/home/rozmar/Network/Genie2Prig/visual_stim/Visual stim'
+# =============================================================================
+# # onlne analysis during the experiment
+# ephys_basedir = '/home/rozmar/Network/Genie2Prig/imaging_ephys/rozsam'
+# vis_stim_basedir = '/home/rozmar/Network/Genie2Prig/visual_stim/Visual stim'
+# 
+# #analysis on marton's PC
+# ephys_basedir = '/home/rozmar/Data/Calcium_imaging/raw/Genie_2P_rig'
+# vis_stim_basedir = '/home/rozmar/Data/Visual_stim/raw/Genie_2P_rig'
+# suite2p_basedir = '/home/rozmar/Data/Calcium_imaging/suite2p/Genie_2P_rig'
+# =============================================================================
 
-ephys_basedir = '/home/rozmar/Data/Calcium_imaging/raw/Genie_2P_rig'
-vis_stim_basedir = '/home/rozmar/Data/Visual_stim/raw/Genie_2P_rig'
-suite2p_basedir = '/home/rozmar/Data/Calcium_imaging/suite2p/Genie_2P_rig'
+# set folder for analysis on dm11
+ephys_basedir = '/home/rozmar/Network/dm11/genie/rozsam/raw/movies_ephys'
+vis_stim_basedir = '/home/rozmar/Network/dm11/genie/rozsam/raw/visual_stim'
+suite2p_basedir = '/home/rozmar/Network/dm11/genie/rozsam/suite2p'
 
+# parameters
 session = '20200508'
 subject = '471993'
 cell = '5'
@@ -25,6 +35,8 @@ plot_suite2p_output = True
 F0win = 20 #s
 F_filter_sigma = .005 #seconds
 neu_r =.7
+
+
 uniqueAngles = [ 45,  90, 135, 180, 225, 270, 315, 360]
 stim_ap_dict =  {key: list() for key in [str(i) for i in uniqueAngles]} 
 baseline_ap_dict = {key: list() for key in [str(i) for i in uniqueAngles]} 
