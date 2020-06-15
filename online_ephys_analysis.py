@@ -1,5 +1,6 @@
 from utils_ephys import extract_tuning_curve
 import utils
+import utils_ephys
 import os
 import numpy as np
 import matplotlib.pyplot as plt
@@ -11,18 +12,18 @@ import re
 ephys_basedir = '/home/rozmar/Network/Genie2Prig/imaging_ephys/rozsam'
 vis_stim_basedir = '/home/rozmar/Network/Genie2Prig/visual_stim/Visual stim'
 
-ephys_basedir = '/home/rozmar/Data/Calcium_imaging/raw/Genie_2P_rig/rozsam'
+ephys_basedir = '/home/rozmar/Data/Calcium_imaging/raw/Genie_2P_rig'
 vis_stim_basedir = '/home/rozmar/Data/Visual_stim/raw/Genie_2P_rig'
-suite2p_basedir = '/home/rozmar/Data/Calcium_imaging/suite2p/Genie_2P_rig/rozsam'
+suite2p_basedir = '/home/rozmar/Data/Calcium_imaging/suite2p/Genie_2P_rig'
 
-session = '20200322'
-subject = '472004'
+session = '20200508'
+subject = '471993'
 cell = '5'
-runnum = [4] # visual stimulus number needed
-roi_num = [0] # suite2p roi number
-plot_suite2p_output = False
+runnum = [5]#range(1,20)#[2] #range(3,20)#[4] # visual stimulus number needed
+roi_num = [6] # suite2p roi number
+plot_suite2p_output = True
 F0win = 20 #s
-F_filter_sigma = .01 #seconds
+F_filter_sigma = .005 #seconds
 neu_r =.7
 uniqueAngles = [ 45,  90, 135, 180, 225, 270, 315, 360]
 stim_ap_dict =  {key: list() for key in [str(i) for i in uniqueAngles]} 
@@ -47,6 +48,7 @@ for ephysfile in ephysfiles:
             ephysfiles_real.append(ephysfile)
             stimnums.append(ephysfile[separators[0]+1:separators[1]])
             stimidxs.append(int(re.findall(r'\d+', ephysfile[separators[0]+1:separators[1]])[0]))
+ephysfiles_real  = np.asarray(ephysfiles_real)[np.argsort(stimidxs)]       
 stimnums = np.asarray(stimnums)[np.argsort(stimidxs)]
 vstimdirs=os.listdir(vis_stim_basedir)
 data_dicts = list()
@@ -79,7 +81,7 @@ for stim,ephysfile in zip(stimnums,ephysfiles_real):
                     data_now = extract_tuning_curve(WS_path = os.path.join(celldir,ephysfile),vis_path = os.path.join(vstimdir_now,vstimfile),plot_data=True,plot_title = 'anm{}-cell{}-{}'.format(subject,cell,stim))
                     
                     if plot_suite2p_output:
-                        #%%
+                        #%
                         suite2p_cell_path = suite2p_basedir +celldir[len(ephys_basedir):]
                         movie_dirs = os.listdir(suite2p_cell_path)
                         for movie_dir in movie_dirs:
@@ -175,7 +177,7 @@ for stim,ephysfile in zip(stimnums,ephysfiles_real):
                                 plt.show()
                                 
                             
-                        #%%
+                        #%
                     if type(data_now)==dict:
                         data_dicts.append(data_now)
                         for a in uniqueAngles:
@@ -209,11 +211,24 @@ for keynow in stim_ap_dict.keys():
 df_stim = pd.DataFrame(stim_ap_dict)
 df_baseline = pd.DataFrame(baseline_ap_dict)
 df_apdiff = df_stim-df_baseline
+df_apdiff_div = df_stim/df_baseline
+df_apdiff_div = df_apdiff_div.replace(np.inf, np.nan)
 #%
 sns.swarmplot(data=df_apdiff,color='k')
 plt.errorbar(df_apdiff.keys(),df_apdiff.mean(skipna=True),df_apdiff.std(skipna=True),color='red',linewidth=4)
 plt.xlabel('Angle')
 plt.ylabel('Firing rate change')
+plt.show()
+
+
+plt.figure()
+#plt.yscale('log')
+sns.swarmplot(data=df_apdiff_div,color='k')
+plt.errorbar(df_apdiff_div.keys(),df_apdiff_div.mean(skipna=True),df_apdiff_div.std(skipna=True),color='red',linewidth=4)
+plt.xlabel('Angle')
+plt.ylabel('Firing rate fold-change')
+
+#plt.ylim([.01,100])
 plt.show()
 
 #%%
