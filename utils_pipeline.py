@@ -183,7 +183,9 @@ def batch_run_suite2p(s2p_params):
                     
                     FOV = np.min(pixelsize)*np.asarray(movie_dims)
                     ops = run_s2p.default_ops()
+                    
                     print('zoom: {}x, pixelsizes: {} micron, dims: {} pixel, FOV: {} microns, estimated XFOV: {}'.format(zoomfactor, pixelsize,movie_dims,FOV,XFOV))
+                    ops['reg_tif'] = True # save registered movie as tif files
                     ops['num_workers'] = 10
                     ops['delete_bin'] = 0 
                     ops['keep_movie_raw'] = 0
@@ -192,10 +194,15 @@ def batch_run_suite2p(s2p_params):
                     ops['save_path'] = save_dir_now
                     ops['fast_disk'] = save_dir_now
                     ops['diameter'] = np.ceil(s2p_params['cell_soma_size']/np.min(pixelsize))#pixelsize_real
-                    ops['tau'] = .7
+                    ops['tau'] = .6
                     ops['maxregshift'] =  s2p_params['max_reg_shift']/np.max(FOV)
+                    ops['nimg_init'] = 1200
                     ops['nonrigid'] = True
-                    ops['block_size'] = np.asarray(np.round((s2p_params['block_size']/np.min(pixelsize))/2)*2,int)
+                    ops['maxregshiftNR'] = int(s2p_params['max_reg_shift_NR']/np.min(pixelsize)) # this one is in pixels...
+                    block_size_optimal = np.round((s2p_params['block_size']/np.min(pixelsize)))
+                    potential_bases = np.asarray([2**np.floor(np.log(block_size_optimal)/np.log(2)),2**np.ceil(np.log(block_size_optimal)/np.log(2)),3**np.floor(np.log(block_size_optimal)/np.log(3)),3**np.ceil(np.log(block_size_optimal)/np.log(3))])
+                    block_size = int(potential_bases[np.argmin(np.abs(potential_bases-block_size_optimal))])
+                    ops['block_size'] = np.ones(2,int)*block_size
                     ops['smooth_sigma'] = s2p_params['smooth_sigma']/np.min(pixelsize)#pixelsize_real #ops['diameter']/10 #
                     ops['smooth_sigma_time'] = s2p_params['smooth_sigma_time']*float(metadata['frame_rate']) # ops['tau']*ops['fs']#
                     ops['data_path'] = [files_dict['dir']]
