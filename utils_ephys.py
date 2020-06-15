@@ -4,6 +4,8 @@ import numpy as np
 from pywavesurfer import ws
 import utils
 from matplotlib import cm as colormap
+import time
+import scipy
 #%%
 def load_wavesurfer_file(WS_path):
     #%%
@@ -12,23 +14,47 @@ def load_wavesurfer_file(WS_path):
     channelnames = np.array(ws_data['header']['AIChannelNames']).astype(str)
     commandchannel = np.asarray(ws_data['header']['AOChannelNames'],str) =='Command'
     commandunit = np.asarray(ws_data['header']['AOChannelUnits'],str)[np.where(commandchannel)[0][0]]
+    ephysidx = (channelnames == 'Voltage').argmax()
     if 'A' in commandunit:
-        ephysidx = (channelnames == 'Voltage').argmax()
         recording_mode = 'CC'
     else:
-        ephysidx = (channelnames == 'Current').argmax()
         recording_mode = 'VC'
     framatimesidx = (channelnames == 'FrameTrigger').argmax()
     
-    sweep = ws_data['sweep_0001']
+
+    
+    keys = list(ws_data.keys())
+    del keys[keys=='header']
+    if len(keys)>1:
+        print('MULTIPLE SWEEPS! HANDLE ME!!')
+        time.sleep(1000)
+    sweep = ws_data[keys[0]]
     sRate = ws_data['header']['AcquisitionSampleRate'][0][0]
     voltage = sweep['analogScans'][ephysidx,:]
+   #%
     if units[ephysidx] == 'mV':
         voltage =voltage/1000
         units[ephysidx] = 'V'
+    if units[ephysidx] == 'pA':
+        voltage =voltage/10**12
+        units[ephysidx] = 'A'
+    if units[ephysidx] == 'nA':
+        voltage =voltage/10**9
+        units[ephysidx] = 'A'   
+
+    
     frame_trigger = sweep['analogScans'][framatimesidx,:]
+    timestamp = ws_data['header']['ClockAtRunStart']
+    
+      #% 
+# =============================================================================
+#             plt.plot(voltage)
+#             plt.plot(peaks,voltage[peaks],'ro')
+# =============================================================================
+            
+            
     #%%
-    return voltage, frame_trigger, sRate, recording_mode
+    return voltage, frame_trigger, sRate, recording_mode, timestamp  , units[ephysidx]
     #%%
 def AP_times_to_rate(AP_time,firing_rate_window=2,frbinwidth = 0.01):
 
@@ -48,7 +74,8 @@ def extract_tuning_curve(WS_path = './test/testWS.h5',vis_path = './test/test.ma
 #     plot_data = True
 # =============================================================================
     vis = utils.processVisMat(vis_path)
-    voltage, frame_trigger, sRate, recording_mode =  load_wavesurfer_file(WS_path)
+    voltage_raw, frame_trigger, sRate, recording_mode, timestamp,ephys_unit =  load_wavesurfer_file(WS_path)
+    voltage = voltage_raw.copy()
     # get frame indices
     
     frame_idx_pos = utils.getEdges(frame_trigger, minDist_samples=20, diffThresh=.02, edge = 'positive')
@@ -71,14 +98,33 @@ def extract_tuning_curve(WS_path = './test/testWS.h5',vis_path = './test/test.ma
     
     t_ephys = np.arange(len(voltage))/sRate
     #
-    v_filt = utils.gaussFilter(voltage,sRate,sigma = .00005)
+    
     #%
     # AP indices in voltage trace
     
     if recording_mode=='VC':
+        cut_out_time = .005
+        cut_out_step = int(cut_out_time*sRate)
+        sRate_needed = 500
+        downsample_factor = int(sRate/sRate_needed)
+        thresh = 10 #pA/ms
+        v_down = voltage[:len(voltage):downsample_factor]
+        v_filt = utils.gaussFilter(v_down,sRate_needed,sigma = .01)
+        if (max(v_filt)-min(v_filt))*10**12>200:# there is a stimulus probably
+            dv=np.diff(v_filt)*sRate_needed*10**9
+            peaks,ampl = scipy.signal.find_peaks(np.abs(dv), height=thresh)
+            peaks = peaks*downsample_factor +int(downsample_factor/2)
+            for peak in peaks:
+                difi  = voltage[peak-cut_out_step] - voltage[peak+cut_out_step]
+                voltage[peak-cut_out_step:] =voltage[peak-cut_out_step:]+ difi
+                voltage[peak-cut_out_step:peak+cut_out_step] =voltage[peak-cut_out_step-1]
+            
+            
+        v_filt = utils.gaussFilter(voltage,sRate,sigma = .00005)    
         v_filt = utils.hpFilter(v_filt, 10, 1, sRate)
         AP_idx,AP_snr,noise_level = utils.findAPs(v_filt*-1, sRate,method ='quiroga')# 'quiroga'
     else:
+        v_filt = utils.gaussFilter(voltage,sRate,sigma = .00005)
         AP_idx,AP_snr,noise_level = utils.findAPs(v_filt, sRate,method ='diff')# 'quiroga'
         v_filt = utils.hpFilter(v_filt, 10, 1, sRate)
     
@@ -150,9 +196,10 @@ def extract_tuning_curve(WS_path = './test/testWS.h5',vis_path = './test/test.ma
         
         fig = plt.figure(figsize = [15,15])
         ax_raw = fig.add_subplot(521)
+        ax_raw.plot(t_ephys, voltage_raw,'b-') # plot v trace
         ax_raw.plot(t_ephys, v_filt,'k-') # plot v trace
         ax_raw.plot(AP_time, v_filt[AP_idx], 'ro',alpha = .5) # show peaks
-        ax_raw.set_ylabel('V')
+        ax_raw.set_ylabel(ephys_unit)
         ax_raw.set_xlim([t_ephys[0],t_ephys[-1]])
         ax_raw.set_xlabel('time (s)')
         
