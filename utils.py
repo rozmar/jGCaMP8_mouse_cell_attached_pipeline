@@ -11,7 +11,39 @@ Utility functions for processing cell attached + 2P recordings
 
 from scipy import signal
 from scipy.io import loadmat
+import scipy.ndimage as ndimage
 import numpy as np
+
+
+
+def rollingfun(y, window = 10, func = 'mean'):
+    """
+    rollingfun
+        rolling average, min, max or std
+    
+    @input:
+        y = array, window, function (mean,min,max,std)
+    """
+    
+    y = np.concatenate([y[window::-1],y,y[:-1*window:-1]])
+    ys = list()
+    for idx in range(window):    
+        ys.append(np.roll(y,idx-round(window/2)))
+    if func =='mean':
+        out = np.nanmean(ys,0)[window:-window]
+    elif func == 'min':
+        out = np.nanmin(ys,0)[window:-window]
+    elif func == 'max':
+        out = np.nanmax(ys,0)[window:-window]
+    elif func == 'std':
+        out = np.nanstd(ys,0)[window:-window]
+    elif func == 'median':
+        out = np.nanmedian(ys,0)[window:-window]
+    else:
+        print('undefinied funcion in rollinfun')
+    return out
+
+
 
 def norm0To1(x):
     """
@@ -21,34 +53,91 @@ def norm0To1(x):
  
 
 
-def hpFilter(sig, HPfreq, order, sRate):
+def hpFilter(sig, HPfreq, order, sRate, padding = True):
     """
     High pass filter
+    -enable padding to avoid edge artefact
     """
+    padlength=10000
     sos = signal.butter(order, HPfreq, 'hp', fs=sRate, output='sos')
-    return signal.sosfilt(sos, sig)
+    if padding: 
+        sig_out = signal.sosfilt(sos, np.concatenate([sig[padlength-1::-1],sig,sig[:-padlength-1:-1]]))
+        sig_out = sig_out[padlength:-padlength]
+    else:
+        sig_out = signal.sosfilt(sos, sig)
+    return sig_out
+
+def gaussFilter(sig,sRate,sigma = .00005):
+    si = 1/sRate
+    #sigma = .00005
+    sig_f = ndimage.gaussian_filter(sig,sigma/si)
+    return sig_f
     
 
-def findAPs(v, sRate, cut_s=[0.1, 1]):
+def findAPs(v, sRate, SN_min = 10,refracter_period = 1,method = 'diff'):
     """
     findAPs: identify APs in voltage trace
     @inputs:
             v: voltage trace (should already be filtered)
             sRate: sampling rate
-            cut_s: cut seconds from [start end] of the recording due to artifacts, edge effects
+            SN_min: minimum SNR to be involved as a spike
     
     @outputs:
             peak indices
-    
-    @todo:
-            determine min peak height based on SNR
+            peak SNR
     """
-    peaks_, _ = signal.find_peaks(v, height=1, distance=100)
+    #%%
+    if method == 'diff':
+        v_orig = v.copy()
+        v=np.diff(v)*sRate
+        window = int(sRate*.1)
+        step=int(window/2)
+        starts = np.arange(0,len(v)-window,step)
+        stds = list()
+        for start in starts:
+            stds.append(np.std(v[start:start+window]))
+        stds_roll = rollingfun(stds,100,'min')
+        stds_roll = rollingfun(stds_roll,500,'mean')
+        #%
+        v_scaled = np.copy(v)
+        noise_level = np.ones(len(v)+1)
+        for start,std in zip(starts,stds_roll):
+            v_scaled[start:start+window]=v[start:start+window]/std
+            noise_level[start:start+window]=std
+        v_scaled[start:]=v[start:]/std
+        noise_level[start:]=std
+        peaks_, properties = signal.find_peaks(v_scaled,height = SN_min, distance=int((refracter_period/1000)*sRate))
+        snr = properties['peak_heights']
+        # ignore suspiciuously low or high 'spikes'
+        if len(peaks_)>10:
+            snr_rolling = rollingfun(snr, window = 5, func = 'median')
+            needed_spikes = (snr>snr_rolling*.1) & (snr<snr_rolling*10)
+            peaks_=peaks_[needed_spikes]
+            snr =snr[needed_spikes]
+        peaks_v = list()
+        for peak_dv in peaks_:
+            peaks_v.append(peak_dv+np.argmax(v_orig[peak_dv:int(.001*sRate)+peak_dv]))
+    else:
+        window = int(sRate*10)
+        step=int(window/2)
+        starts = np.arange(0,len(v)-window,step)
+        stds = list()
+        for start in starts:
+            stds.append(np.median(np.abs((v[start:start+window]))/.6745))
+        #%
+        v_scaled = np.copy(v)
+        noise_level = np.ones(len(v))
+        for start,std in zip(starts,stds):
+            v_scaled[start:start+window]=v[start:start+window]/std
+            noise_level[start:start+window]=std
+        v_scaled[start:]=v[start:]/std
+        noise_level[start:]=std
+        peaks_v, properties = signal.find_peaks(v_scaled,height = SN_min, distance=int((refracter_period/1000)*sRate))
+        snr = properties['peak_heights']
+        
+    #%%
+    return peaks_v, snr, noise_level
     
-    # ignore peaks within the first 100 ms because they may be an artifact of filtering
-    # ignore peaks in last 1 s to avoid edge effects
-    return peaks_[(peaks_ > sRate * cut_s[0]) & (peaks_ < len(v) - cut_s[1]*sRate)]
-
 
 
 def getEdges(sig, minDist_samples = 50, diffThresh = 1, edge = 'positive'):
@@ -64,7 +153,7 @@ def getEdges(sig, minDist_samples = 50, diffThresh = 1, edge = 'positive'):
         indices of edges
     """
     # take diff of signal and threshold it
-    sig_diff = (np.diff(sig) > diffThresh) if edge is 'positive' else (np.diff(sig) > -1*diffThresh)
+    sig_diff = (np.diff(sig) > diffThresh) if edge == 'positive' else (np.diff(sig) < -1*diffThresh)
     
     # find peaks in diff array to get indices
     peaks, _ = signal.find_peaks(sig_diff, height=diffThresh/2, distance=minDist_samples)
@@ -115,3 +204,5 @@ def processVisMat(vis_mat_path):
     vis['trials'] = mat[10]
     
     return vis
+
+
