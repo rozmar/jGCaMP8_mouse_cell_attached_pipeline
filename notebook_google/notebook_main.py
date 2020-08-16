@@ -37,13 +37,13 @@ def fetch_sheet_titles(spreadsheetname):
     return sheetnames
 #%
 def fetch_sheet(spreadsheet_name,sheet_title):
-    #%%
+    #%
     wb = client.open(spreadsheet_name)
     sheetnames = list()
     worksheets = wb.worksheets()
     for sheet in worksheets:
         sheetnames.append(sheet.title)
-        #%%
+        #%
     if sheet_title in sheetnames:
         idx_now = sheetnames.index(sheet_title)
         if idx_now > -1:
@@ -91,8 +91,11 @@ def fetch_lab_metadata(ID):
 
 def update_metadata(notebook_name,metadata_dir):
     lastmodify = fetch_lastmodify_time(notebook_name)
-    with open(os.path.join(metadata_dir,'last_modify_time.json')) as timedata:
-        lastmodify_prev = json.loads(timedata.read())
+    try:
+        with open(os.path.join(metadata_dir,'last_modify_time.json')) as timedata:
+            lastmodify_prev = json.loads(timedata.read())
+    except:
+        lastmodify_prev = None
     if lastmodify != lastmodify_prev:
         print('updating metadata from google drive')
         sessions = fetch_sheet_titles(notebook_name)
