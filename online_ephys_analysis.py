@@ -43,13 +43,11 @@ suite2p_basedir = '/home/rozmar/Data/Calcium_imaging/suite2p/Genie_2P_rig'
 # roi_num = [2] # suite2p roi number
 # =============================================================================
 # parameters
-# =============================================================================
-# session = '20200814'
-# subject = '472180'
-# cell = '1'
-# runnum = [3]#range(1,20)#[3]#[2] #range(3,20)#[4] # visual stimulus number needed
-# roi_num = [9] # suite2p roi number
-# =============================================================================
+session = '20200814'
+subject = '472180'
+cell = '1'
+runnum = [3]#range(1,20)#[3]#[2] #range(3,20)#[4] # visual stimulus number needed
+roi_num = [9] # suite2p roi number
 plot_suite2p_output = True
 F0win = 20 #s
 F_filter_sigma = .01 #seconds
