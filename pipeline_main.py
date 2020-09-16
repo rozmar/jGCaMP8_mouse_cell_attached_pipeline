@@ -27,7 +27,7 @@ s2p_params = {'cell_soma_size':20, # microns - obsolete
               'smooth_sigma_time':.001, #seconds,
               'basedir':'/home/rozmar/Data/Calcium_imaging/raw/Genie_2P_rig', # folder where the raw ephys and movies are found
               'basedir_out':'/home/rozmar/Data/Calcium_imaging/suite2p/Genie_2P_rig', #'/home/rozmar/Data/Calcium_imaging/suite2p_fast/Genie_2P_rig'
-              'basedir_out_slow':'/home/rozmar/Data/Calcium_imaging/suite2p/Genie_2P_rig',
+              'basedir_out_slow':'/home/rozmar/Data/Calcium_imaging/suite2p/686_688',
               'overwrite': False} # folder where the suite2p output is saved
 
 metadata_params = {'notebook_name':"Genie Calcium Imaging",
@@ -122,7 +122,7 @@ for metadata_file in metadata_files:
         roi_num = df_run['suite2p-ROI-num']
         run_num =int(df_run['Run'])
         imaging_quality = df_run['good?']
-        if imaging_quality ==1 and ',' not in roi_num:
+        if imaging_quality ==1 and ',' not in str(roi_num):
             
             sessions = os.listdir(ephys_params['basedir'])
             sessiondir = os.path.join(ephys_params['basedir'],'{}-anm{}'.format(session,subject))
@@ -169,8 +169,12 @@ for metadata_file in metadata_files:
                         
                 #%
                 #% get extracted ROI
-                suite2p_cell_path = s2p_params['basedir_out_slow'] +celldir[len(ephys_params['basedir']):]
-                movie_dirs = os.listdir(suite2p_cell_path)
+                try:
+                    suite2p_cell_path = s2p_params['basedir_out_slow'] +celldir[len(ephys_params['basedir']):]
+                    movie_dirs = os.listdir(suite2p_cell_path)
+                except: #HOTFIX Karel needs some figures so I am including only a subset of the movies
+                    print('movie not found: {}'.format(suite2p_cell_path))
+                    continue
                 for movie_dir in movie_dirs:
                     separators = [m.start() for m in re.finditer('_| |-', movie_dir)]
                     if len(separators)==1: # HOTFIX first recordings the movie name doesn't include the cell identity
@@ -347,14 +351,14 @@ for metadata_file in metadata_files:
                         
 #%% narrowing down events
     
-    
+#superresolution_traces = dict() 
 bin_step = .5
-bin_size = 1
-    
-min_accomodation = 0.5
+bin_size = 2
+
+min_accomodation = 0.25
 max_baseline_dff = 1
 min_ap_frequency = 40 
-sensor = 'XCaMP'#'G7F'#'UF456'#
+sensor = 688.#'688.0'#'686.0'#'UF456'#'XCaMP'#'G7F'#
 #cell_id ='20200322-anm472004-cell5'
 #cell_id ='20200417-anm472001-cell4'
 plot_stuff=True
@@ -372,6 +376,9 @@ amplitude_mean_AU = list()
 amplitude_std_AU = list()
 amplitude_median_AU = list()
 for apnum in np.unique(event_ap_num):
+    if apnum ==1:
+        superresolution_traces[sensor]=dict()
+    superresolution_traces[sensor]['apnum_{}'.format(apnum)]=dict()
     if apnum>1:
         break
     #%
@@ -451,12 +458,44 @@ for apnum in np.unique(event_ap_num):
                         y_conc = np.concatenate(y)
                         bin_centers = np.arange(np.min(x_conc),np.max(x_conc),bin_step)
                         bin_mean = list()
+                        bin_median = list()
                         for bin_center in bin_centers:
                             bin_mean.append(np.mean(y_conc[(x_conc>bin_center-bin_size/2) & (x_conc<bin_center+bin_size/2)]))
+                            bin_median.append(np.median(y_conc[(x_conc>bin_center-bin_size/2) & (x_conc<bin_center+bin_size/2)]))
                         #break
                         #%
-                        risetime = 40
-                        startidx = np.argmax(bin_centers>risetime)
+                        bin_mean = bin_median
+#% calculate rise time
+                        #eradicate NANs from superresolution trace
+                        while sum(np.isnan(bin_mean))>0:
+                            #print(sum(np.isnan(bin_mean)))
+                            startpos = np.argmax(np.isnan(bin_mean))
+                            endpos = np.argmin(np.isnan(bin_mean[startpos:]))+startpos-1
+                            nanlen = endpos-startpos+1
+                                
+                            startval = bin_mean[startpos-1]
+                            endval = bin_mean[endpos+1]
+                            if startpos ==0: 
+                                startval = endval
+                            if endpos == len(bin_mean)-1:
+                                endval = startval
+                            vals = (np.arange(nanlen+2)/(nanlen+1))*(endval-startval)+startval
+                            
+                            bin_mean[startpos:endpos+1]=vals[1:-1]
+                        #%
+                        rise_time_amplitude_ratio=.9
+                        baseline_value = np.mean(bin_mean[:np.argmin(np.abs(bin_centers+bin_size))])
+                        bin_mean_filt = utils.gaussFilter(bin_mean,1/bin_step,sigma = 1) #1ms gaussian filter to find max
+                        peak_idx = np.argmax(bin_mean_filt)
+                        peak_value = np.max(bin_mean_filt)
+                        goal_value = baseline_value+(peak_value-baseline_value)*rise_time_amplitude_ratio
+                        rise_start_idx = np.argmin(np.abs(bin_centers))
+                        rise_end_idx = np.argmax(bin_mean>goal_value)
+                        risetime = bin_centers[rise_end_idx]
+                        
+
+                        #risetime = 10
+                        startidx = np.argmax(bin_centers>risetime*2)
                         xvals= bin_centers[startidx:]-bin_centers[startidx]
                         xvals_plot =bin_centers[startidx:]
                         yvals = bin_mean[startidx:]
@@ -468,16 +507,22 @@ for apnum in np.unique(event_ap_num):
                         ax_local_timecourse.plot(np.nanmean(x,1),np.nanmean(y,1),'k-',lw=2)
                         ax_fit.plot(bin_centers,bin_mean,'ro')
                         ax_fit.plot(xvals_plot,yfit,'k-')
+                        ax_fit.plot([bin_centers[rise_start_idx],bin_centers[rise_end_idx]],[baseline_value,goal_value],'k_',markersize=26,markeredgewidth=2)
                         
+                        #%
+
                         if out[0][0]>out[0][3]:
-                            ax_fit.set_title('tau1: {:.2f} ms, tau2: {:.2f} ms, w_tau1: {:.2f}%'.format(out[0][1],out[0][4],out[0][0]/(out[0][0]+out[0][3])))
+                            ax_fit.set_title('tau1: {:.2f} ms, tau2: {:.2f} ms, w_tau1: {:.2f}%, \n 0-{}% risetime: {:.2f} ms'.format(out[0][1],out[0][4],out[0][0]/(out[0][0]+out[0][3]),int(rise_time_amplitude_ratio*100),risetime))
                         else:
-                            ax_fit.set_title('tau1: {:.2f} ms, tau2: {:.2f} ms, w_tau1: {:.2f}%'.format(out[0][4],out[0][1],out[0][3]/(out[0][0]+out[0][3])))
+                            ax_fit.set_title('tau1: {:.2f} ms, tau2: {:.2f} ms, w_tau1: {:.2f}%, \n 0-{}% risetime: {:.2f} ms'.format(out[0][4],out[0][1],out[0][3]/(out[0][0]+out[0][3]),int(rise_time_amplitude_ratio*100),risetime))
                         ax_fit.set_xlim([np.min(bin_centers),np.max(bin_centers)])
+                        #ax_fit.set_xlim([-10,40])
                         #break
                         ax_local_timecourse.set_title('sensor: {}, n: {}, bin size: {} ms'.format(sensor,len(idxs),bin_size))
                         
-                    
+                        superresolution_traces[sensor]['apnum_{}'.format(apnum)]['bin_centers'] = bin_centers
+                        superresolution_traces[sensor]['apnum_{}'.format(apnum)]['bin_mean'] = bin_mean
+                        
                 unique_samplingrates=np.unique(samplingrates)   
                 for x,y in zip(np.asarray(V_t_all)[idxs],np.asarray(V_all)[idxs]):
                     ax_ephys.plot(x,y)
@@ -522,8 +567,19 @@ for apnum in np.unique(event_ap_num):
                 #break
     except:
         pass
-#%%
-        
+# =============================================================================
+# #%% superresolution traces for Karel in svg
+# for sensor in superresolution_traces.keys():
+#     fig = plt.figure()
+#     x = superresolution_traces[sensor]['apnum_1']['bin_centers']
+#     y = superresolution_traces[sensor]['apnum_1']['bin_mean']
+#     ax=fig.add_subplot(111)
+#     ax.plot(x,y)
+#     ax.set_xlim([np.min(x),np.max(x)])
+#     ax.set_title(sensor)
+#    # break
+#         
+# =============================================================================
     
 #%%
 import seaborn as sns
@@ -617,3 +673,20 @@ ax_ap.set_xlabel('ap num')
 ax_ap.set_zlabel('dF')
 ax_ap.set_ylabel('F0')
 plt.show()
+
+#%% plot overlay superresolution traces
+sensors_to_plot = superresolution_traces.keys()
+apnum = 1
+fig = plt.figure()
+wave_ax = fig.add_subplot(111)
+for sensor in sensors_to_plot:
+    try:
+        x= superresolution_traces[sensor]['apnum_{}'.format(apnum)]['bin_centers']
+        y = superresolution_traces[sensor]['apnum_{}'.format(apnum)]['bin_mean']
+        wave_ax.plot(x,y,label = sensor)
+    except:
+        pass
+wave_ax.set_xlim([np.min(x),np.max(x)])
+wave_ax.set_xlabel('time from AP peak (ms)')
+wave_ax.set_ylabel('dF/F')
+plt.legend()
