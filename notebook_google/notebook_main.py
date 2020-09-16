@@ -6,6 +6,7 @@ import pandas as pd
 #import numpy as np
 import os
 import json
+import time
 # use creds to create a client to interact with the Google Drive API
 scope = ['https://www.googleapis.com/auth/analytics.readonly',
       'https://www.googleapis.com/auth/drive',
@@ -65,7 +66,13 @@ def fetch_lab_metadata(ID):
     #%
     wb = client.open("Lab metadata")
     sheetnames = list()
-    worksheets = wb.worksheets()
+    while True:
+        try:
+            worksheets = wb.worksheets()
+            break
+        except:
+            print('quota exceeded?, waiting 15s')
+            time.sleep(15)
     for sheet in worksheets:
         sheetnames.append(sheet.title)
         #%
@@ -90,6 +97,7 @@ def fetch_lab_metadata(ID):
         return None
 
 def update_metadata(notebook_name,metadata_dir):
+    #%%
     lastmodify = fetch_lastmodify_time(notebook_name)
     try:
         with open(os.path.join(metadata_dir,'last_modify_time.json')) as timedata:
@@ -100,7 +108,13 @@ def update_metadata(notebook_name,metadata_dir):
         print('updating metadata from google drive')
         sessions = fetch_sheet_titles(notebook_name)
         for session in sessions:
-            df_wr = fetch_sheet(notebook_name,session)
+            while True:
+                try:    
+                    df_wr = fetch_sheet(notebook_name,session)
+                    break
+                except:
+                    print('quota exceeded at table {}, waiting 150s'.format(session))
+                    time.sleep(150)
             if type(df_wr) == pd.DataFrame:
                 df_wr.to_csv(os.path.join(metadata_dir,'{}.csv'.format(session))) 
                 #%
