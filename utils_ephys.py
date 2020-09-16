@@ -91,8 +91,11 @@ def extract_tuning_curve(WS_path = './test/testWS.h5',vis_path = './test/test.ma
     nFrames_vis = vis['total_frames']
     if nFrames_vis < nFrames_ws:
         nFrames_ws = nFrames_vis
-        frame_idx = frame_idx[:nFrames_ws]
-    if not (nFrames_ws == nFrames_vis):
+        difs = np.round(np.diff(frame_idx)/100)
+        if any(difs>np.median(difs)):
+            neededframes = np.where(difs>np.median(difs)[0])
+            frame_idx = frame_idx[:neededframes+1]#nFrames_ws
+    if nFrames_ws < nFrames_vis:
         print('Number of frames in WS file (' + str(nFrames_ws) + ') does not match num frames in MAT file (' + str(nFrames_vis) + ')')
         raise ValueError('Number of frames in WS file (' + str(nFrames_ws) + ') does not match num frames in MAT file (' + str(nFrames_vis) + ')')
     

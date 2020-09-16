@@ -3,10 +3,14 @@ from ScanImageTiffReader import ScanImageTiffReader
 from pathlib import Path
 import json
 import numpy as np
+from suite2p import default_ops as s2p_default_ops
 from suite2p import run_s2p
+from suite2p import classification
 import shutil
+import time
 #%%
 def extract_scanimage_metadata(file):
+    #%%
     image = ScanImageTiffReader(file)
     metadata_raw = image.metadata()
     metadata_str = metadata_raw.split('\n\n')[0]
@@ -33,8 +37,16 @@ def extract_scanimage_metadata(file):
             metadata.pop(k)
     metadata['json'] = json.loads(metadata_json)
     frame_rate = metadata['hRoiManager']['scanVolumeRate']
-    z_collection = metadata['hFastZ']['userZs']
-    num_planes = len(z_collection)
+    try:
+        z_collection = metadata['hFastZ']['userZs']
+        num_planes = len(z_collection)
+    except: # new scanimage version
+        if metadata['hFastZ']['hasFastZ'] == 'true':
+            print('multiple planes not handled in metadata collection.. HANDLE ME!!!')
+            time.sleep(1000)
+        else:
+            num_planes = 1
+    
     roi_metadata = metadata['json']['RoiGroups']['imagingRoiGroup']['rois']
     
     
@@ -107,7 +119,7 @@ def extract_scanimage_metadata(file):
            'frame_rate':frame_rate,
            'num_planes':num_planes}
     return out
-
+#%%
 def extract_files_from_dir(basedir):
     files = os.listdir(basedir)
     exts = list()
@@ -145,7 +157,7 @@ def extract_files_from_dir(basedir):
            'dirs':dirs
            }
     return out
-
+#%%
 def batch_run_suite2p(s2p_params):
     #%%
     sessions = os.listdir(s2p_params['basedir'])
@@ -158,15 +170,35 @@ def batch_run_suite2p(s2p_params):
         for dir_now in files_dict['dirs']:
             if 'stack' not in dir_now and 'suite2p' not in dir_now:
                 cell_dir = os.path.join(session_dir,dir_now)
+                #%%
+# =============================================================================
+#             for cell_dir in ['/home/rozmar/Data/Calcium_imaging/raw/Genie_2P_rig/20200731-anm472181',#179 for visualstimonly experiments
+#                              '/home/rozmar/Data/Calcium_imaging/raw/Genie_2P_rig/20200704-anm478411',
+#                              '/home/rozmar/Data/Calcium_imaging/raw/Genie_2P_rig/20200623-anm478404',
+#                              '/home/rozmar/Data/Calcium_imaging/raw/Genie_2P_rig/20200623-anm478343']:
+# =============================================================================
                 files_dict = extract_files_from_dir(cell_dir)
                 savedir = s2p_params['basedir_out'] + files_dict['dir'][len(s2p_params['basedir']):]
                 savedir_slow = s2p_params['basedir_out_slow'] + files_dict['dir'][len(s2p_params['basedir']):]
                 uniquebasenames = np.unique(files_dict['basenames'][files_dict['exts']=='.tif'])
                 for uniquebasename in uniquebasenames:
+                    print(uniquebasename)
                     #%
                     save_dir_now = os.path.join(savedir,uniquebasename)
                     save_dir_slow_now = os.path.join(savedir_slow,uniquebasename)
-                    file_idxs = files_dict['basenames'] == uniquebasename
+                    os.makedirs(save_dir_now, exist_ok=True)
+                    os.makedirs(save_dir_slow_now, exist_ok=True)
+                    files_already_there = os.listdir(save_dir_now)
+                    files_already_there_slow = os.listdir(save_dir_slow_now)
+                    if len(files_already_there)>1 or len(files_already_there_slow)>1 or s2p_params['overwrite']:
+                        print('{} - {} - {} already done'.format(session,dir_now, uniquebasename))
+                        continue
+                    if 'stack' in uniquebasename.lower():
+                        print('{} is a stacks, skipped'.format(uniquebasename))
+                        continue
+                        #time.sleep(10000)
+                        
+                    file_idxs = (files_dict['basenames'] == uniquebasename) & (files_dict['exts']=='.tif')
                     fnames = files_dict['filenames'][file_idxs]
                     file_indices = files_dict['fileindices'][file_idxs]
                     order  = np.argsort(file_indices)
@@ -182,15 +214,15 @@ def batch_run_suite2p(s2p_params):
                     #pixelsize_real =  XFOV/movie_dims[0]
                     
                     FOV = np.min(pixelsize)*np.asarray(movie_dims)
-                    ops = run_s2p.default_ops()
+                    ops = s2p_default_ops()#run_s2p.default_ops()
                     
                     print('zoom: {}x, pixelsizes: {} micron, dims: {} pixel, FOV: {} microns, estimated XFOV: {}'.format(zoomfactor, pixelsize,movie_dims,FOV,XFOV))
                     ops['reg_tif'] = True # save registered movie as tif files
-                    ops['num_workers'] = 10
+                    ops['num_workers'] = 8
                     ops['delete_bin'] = 0 
                     ops['keep_movie_raw'] = 0
                     ops['fs'] = float(metadata['frame_rate'])
-                    ops['nchannels'] = int(metadata['metadata']['hChannels']['channelsAvailable'])
+                    ops['nchannels'] = int(metadata['metadata']['hChannels']['channelsAvailable']) #TODO this is not good! doesn't recognize single channel movies
                     ops['save_path'] = save_dir_now
                     ops['fast_disk'] = save_dir_now
                     ops['diameter'] = np.ceil(s2p_params['cell_soma_size']/np.min(pixelsize))#pixelsize_real
@@ -207,26 +239,126 @@ def batch_run_suite2p(s2p_params):
                     ops['smooth_sigma_time'] = s2p_params['smooth_sigma_time']*float(metadata['frame_rate']) # ops['tau']*ops['fs']#
                     ops['data_path'] = [files_dict['dir']]
                     ops['tiff_list'] = fnames
-                    os.makedirs(save_dir_now, exist_ok=True)
-                    os.makedirs(save_dir_slow_now, exist_ok=True)
-                    files_already_there = os.listdir(save_dir_now)
-                    files_already_there_slow = os.listdir(save_dir_slow_now)
-                    if len(files_already_there)>1 or len(files_already_there_slow)>1:
-                        print('{} already done'.format(uniquebasename))
-                        #time.sleep(10000)
-                    else:
-                        print(ops['data_path'])
+                    
+     
+                    print(ops['data_path'])
+                    
+                    #%
+                    try:
+                        run_s2p(ops)
+                    except:
+                        print('error in suite2p')
+                    #%
+                    files_to_move = os.listdir(os.path.join(ops['data_path'][0],'suite2p'))
+                    for file_now in files_to_move:
+                        shutil.move(os.path.join(ops['data_path'][0],'suite2p',file_now),os.path.join(savedir,uniquebasename,file_now))
+
+                    planes = os.listdir(os.path.join(savedir,uniquebasename,'suite2p'))
+                    for plane in planes:
+                        rawfiles = os.listdir(os.path.join(savedir,uniquebasename,'suite2p',plane))
+                        for rawfile in rawfiles:
+                            shutil.move(os.path.join(savedir,uniquebasename,'suite2p',plane,rawfile),os.path.join(savedir,uniquebasename,plane,rawfile))
+                    os.rmdir(os.path.join(ops['data_path'][0],'suite2p'))
+                    
+                    
+                    
+                    
+                    
+#%% copy  iscell.npys
+def suite2p_save_iscell_file_locations(basedir = '/home/rozmar/Data/Calcium_imaging/suite2p/Genie_2P_rig_old_registration',destdir = '/home/rozmar/Data/Calcium_imaging/suite2p/iscell_files'):
+    filepaths = list()
+    sessions = os.listdir(basedir)
+    sessions.sort()
+    for session in sessions:
+        session_dir = os.path.join(basedir,session)
+        if not os.path.isdir(session_dir):
+            continue
+        files_dict = extract_files_from_dir(session_dir)
+        for dir_now in files_dict['dirs']:
+            if 'stack' not in dir_now and 'suite2p' not in dir_now:
+                cell_dir = os.path.join(session_dir,dir_now)
+                movies_dict = extract_files_from_dir(cell_dir)
+                for movie_dir_now in movies_dict['dirs']:
+                    print(movie_dir_now)
+                    sourcefile = os.path.join(cell_dir,movie_dir_now,'plane0/iscell.npy')
+                    if os.path.exists(sourcefile):
                         
-                        #%%
-                        run_s2p.run_s2p(ops)
-                        #%
-                        files_to_move = os.listdir(os.path.join(ops['data_path'][0],'suite2p'))
-                        for file_now in files_to_move:
-                            shutil.move(os.path.join(ops['data_path'][0],'suite2p',file_now),os.path.join(savedir,uniquebasename,file_now))
+                        filepaths.append(sourcefile)
+    # =============================================================================
+    #                 try:
+    #                     shutil.copy(sourcefile,os.path.join(destdir,'{}_{}_{}.npy'.format(session,dir_now,movie_dir_now)))
+    #                 except:
+    #                     print('not found')
+    # =============================================================================
+    with open(os.path.join(destdir,'listfile.txt'), 'w') as filehandle:
+        filehandle.writelines("%s\n" % path for path in filepaths)
+        
+def suite2p_backup_iscell_files(basedir = '/home/rozmar/Data/Calcium_imaging/suite2p/Genie_2P_rig'):
+    #%%
+    #basedir = '/home/rozmar/Data/Calcium_imaging/suite2p/Genie_2P_rig'
+    filepaths = list()
+    sessions = os.listdir(basedir)
+    sessions.sort()
+    for session in sessions:
+        session_dir = os.path.join(basedir,session)
+        if not os.path.isdir(session_dir):
+            continue
+        files_dict = extract_files_from_dir(session_dir)
+        for dir_now in files_dict['dirs']:
+            if 'stack' not in dir_now and 'suite2p' not in dir_now:
+                cell_dir = os.path.join(session_dir,dir_now)
+                movies_dict = extract_files_from_dir(cell_dir)
+                for movie_dir_now in movies_dict['dirs']:
+                    print(movie_dir_now)
+                    sourcefile = os.path.join(cell_dir,movie_dir_now,'plane0/iscell.npy')
+                    if os.path.exists(sourcefile):
+                        
+                        filepaths.append(sourcefile)
+                    try:
+                        shutil.copy(sourcefile,os.path.join(cell_dir,movie_dir_now,'plane0/iscell_backup.npy'))
+                    except:
+                        print('not found')
+# =============================================================================
+#     with open(os.path.join(destdir,'listfile.txt'), 'w') as filehandle:
+#         filehandle.writelines("%s\n" % path for path in filepaths)
+# =============================================================================
+def suite2p_rerun_classifier(basedir = '/home/rozmar/Data/Calcium_imaging/suite2p/Genie_2P_rig',classifierfile='/home/rozmar/Data/Calcium_imaging/suite2p/iscell_files/bigclassifier.npy'):
+    #%%
     
-                        planes = os.listdir(os.path.join(savedir,uniquebasename,'suite2p'))
-                        for plane in planes:
-                            rawfiles = os.listdir(os.path.join(savedir,uniquebasename,'suite2p',plane))
-                            for rawfile in rawfiles:
-                                shutil.move(os.path.join(savedir,uniquebasename,'suite2p',plane,rawfile),os.path.join(savedir,uniquebasename,plane,rawfile))
-                        os.rmdir(os.path.join(ops['data_path'][0],'suite2p'))
+# =============================================================================
+#     basedir = '/home/rozmar/Data/Calcium_imaging/suite2p/Genie_2P_rig'
+#     classifierfile='/home/rozmar/Data/Calcium_imaging/suite2p/iscell_files/bigclassifier.npy'
+# =============================================================================
+    sessions = os.listdir(basedir)
+    sessions.sort()
+    for session in sessions:
+        session_dir = os.path.join(basedir,session)
+        if not os.path.isdir(session_dir):
+            continue
+        files_dict = extract_files_from_dir(session_dir)
+        for dir_now in files_dict['dirs']:
+            if 'stack' not in dir_now and 'suite2p' not in dir_now:
+                cell_dir = os.path.join(session_dir,dir_now)
+                movies_dict = extract_files_from_dir(cell_dir)
+                for movie_dir_now in movies_dict['dirs']:
+                    print(movie_dir_now)
+                    iscellfile = os.path.join(cell_dir,movie_dir_now,'plane0/iscell.npy')
+                    opsfile = os.path.join(cell_dir,movie_dir_now,'plane0/ops.npy')
+                    statfile = os.path.join(cell_dir,movie_dir_now,'plane0/stat.npy')
+                    if os.path.exists(iscellfile):
+# =============================================================================
+#                         try:
+# =============================================================================
+                        ops = np.load(opsfile, allow_pickle=True).item()
+                        stat = np.load(statfile, allow_pickle=True)
+                        ops['save_path'] = os.path.join(cell_dir,movie_dir_now,'plane0')
+                        iscell = classification.classify(ops, stat, classfile=classifierfile)
+                        #np.save(iscellfile,iscell)
+# =============================================================================
+#                         except:
+#                             print('error..')
+# =============================================================================
+# =============================================================================
+#     with open(os.path.join(destdir,'listfile.txt'), 'w') as filehandle:
+#         filehandle.writelines("%s\n" % path for path in filepaths)
+# =============================================================================

@@ -23,16 +23,19 @@ s2p_params = {'cell_soma_size':20, # microns - obsolete
               'max_reg_shift':20, # microns
               'max_reg_shift_NR': 10, # microns
               'block_size': 60, #microns
-              'smooth_sigma':1, # microns
-              'smooth_sigma_time':.1, #seconds,
+              'smooth_sigma':.5, # microns
+              'smooth_sigma_time':.001, #seconds,
               'basedir':'/home/rozmar/Data/Calcium_imaging/raw/Genie_2P_rig', # folder where the raw ephys and movies are found
-              'basedir_out':'/home/rozmar/Data/Calcium_imaging/suite2p/Genie_2P_rig',
-              'basedir_out_slow':'/home/rozmar/Data/Calcium_imaging/suite2p/Genie_2P_rig'} # folder where the suite2p output is saved
+              'basedir_out':'/home/rozmar/Data/Calcium_imaging/suite2p/Genie_2P_rig', #'/home/rozmar/Data/Calcium_imaging/suite2p_fast/Genie_2P_rig'
+              'basedir_out_slow':'/home/rozmar/Data/Calcium_imaging/suite2p/Genie_2P_rig',
+              'overwrite': False} # folder where the suite2p output is saved
 
 metadata_params = {'notebook_name':"Genie Calcium Imaging",
                    'metadata_dir':"/home/rozmar/Data/Calcium_imaging/Metadata"}
+anatomy_metadata_params = {'notebook_name':"Genie anit-GFP immunostaining",
+                           'metadata_dir':"/home/rozmar/Data/Anatomy/Metadata"}
 
-ephys_params = {'basedir':'/home/rozmar/Data/Calcium_imaging/raw/Genie_2P_rig'}
+ephys_params = {'basedir':'/home/rozmar/Network/rozsam-nas-01-smb/Calcium_imaging/raw/Genie_2P_rig'}#'/home/rozmar/Data/Calcium_imaging/raw/Genie_2P_rig'
 
 visual_stim_params = {'basedir': '/home/rozmar/Data/Visual_stim/raw/Genie_2P_rig'}
 
@@ -42,19 +45,29 @@ F_filter_sigma = .001 #sigma for gaussian filtering in seconds
 neu_r =0#.7 # r value for neuropil subtraction
 
 time_back = .05 # seconds from event start when cutting out ephys and ophys responses
-time_forward = .4 # seconds from event start when cutting out ephys and ophys responses
+time_forward = .45 # seconds from event start when cutting out ephys and ophys responses
 
 min_baseline_time =1 #seconds before an event - for bucketing
 integration_time = .4 # seconds after the last AP - for bucketing
 #%% registration and ROI detection
 utils_pipeline.batch_run_suite2p(s2p_params)
-                    
+#%%
+# feeding movies in datajoint
+# feeding ROIs in datajoint
+# feeding ephys in datajoint
+# feeding visual stim to datajoint (trials..?)
+# ROI-ephys correspondance
+# analysis
+
 #%%  Manual part
 # here comes a manual step when you find the corresponding ROI with suite2p in 
 # each recording and update it to the google spreadsheet
+#%%
+
 
 #%% update metadata from google spreadsheet
 online_notebook.update_metadata(metadata_params['notebook_name'],metadata_params['metadata_dir'])
+online_notebook.update_metadata(anatomy_metadata_params['notebook_name'],anatomy_metadata_params['metadata_dir'])
 #%% QC for imaging and ephys
 event_ap_num = list()
 event_ap_times = list()
@@ -88,7 +101,7 @@ ignored_aps = 0
 
 metadata_files = os.listdir(metadata_params['metadata_dir'])
 for metadata_file in metadata_files:
-    if '-anm' in metadata_file:
+    if '-anm' in metadata_file and 'visual' not in metadata_file:
          df_session = pd.read_csv(os.path.join(metadata_params['metadata_dir'],metadata_file))
          session = metadata_file[:metadata_file.find('-anm')]
          subject = metadata_file[metadata_file.find('-anm')+4:-4]
@@ -99,6 +112,8 @@ for metadata_file in metadata_files:
     #vstimdirs=os.listdir(visual_stim_params['basedir'])
     #counter = 0
     sensor = df_session['sensor'][0]
+    if len(df_session)<2:
+        continue # 1 line means no movies
     for df_run in df_session.iterrows():
         
         idx = df_run[0]
@@ -143,7 +158,7 @@ for metadata_file in metadata_files:
                     valid_framenum = np.argmax(np.diff(frame_idx_pos)>2*np.median(np.diff(frame_idx_pos)))+1
                     frame_idx_pos = frame_idx_pos[:valid_framenum]
                     frame_idx_neg = frame_idx_neg[:valid_framenum]
-                frame_idx = np.asarray(np.mean([frame_idx_pos,frame_idx_neg],0),dtype = int)
+                frame_idx = np.asarray(np.mean([frame_idx_pos[:len(frame_idx_neg)],frame_idx_neg],0),dtype = int)
                 frame_times = t_ephys[frame_idx]
                 
                 v_filt = utils.gaussFilter(voltage,sRate,sigma = .00005)
@@ -162,7 +177,11 @@ for metadata_file in metadata_files:
                         separators=[0]+separators
                     if len(re.findall(r'\d+', movie_dir[separators[0]+1:separators[1]]))>0 and int(re.findall(r'\d+', movie_dir[separators[0]+1:separators[1]])[0]) == run_num:
                         suite2p_movie_path = os.path.join(suite2p_cell_path,movie_dir,'plane0')
-                        F_all = np.load(os.path.join(suite2p_movie_path,'F.npy'))
+                        try:
+                            F_all = np.load(os.path.join(suite2p_movie_path,'F.npy'))
+                        except:
+                            print('no fluorescence traces found')
+                            continue
                         Fneu_all = np.load(os.path.join(suite2p_movie_path,'Fneu.npy'))
                         framerate = int(1/np.mean(np.diff(frame_times)))
                         F = F_all[int(roi_num)]
@@ -172,7 +191,9 @@ for metadata_file in metadata_files:
                         Fneu_orig = Fneu.copy()
                         F = utils.gaussFilter(F,framerate,sigma = F_filter_sigma)
                         Fneu = utils.gaussFilter(Fneu,framerate,sigma = F_filter_sigma)
-                        
+                        if len(F) > len(frame_times):
+                            print('ephys trace is shorter than expected - not enough frame times')
+                            continue # no time for all frames
                         
                         
                         # - ------ calculate r
@@ -197,12 +218,14 @@ for metadata_file in metadata_files:
                             neuropilvals = np.asarray([np.min(Fneu_orig_filt[needed]),np.max(Fneu_orig_filt[needed])])
                             fittedvals = np.polyval(p,neuropilvals)
                             
-                            plt.plot(Fneu_orig_filt[needed],F_orig_filt[needed],'ko')
-                            plt.plot(neuropilvals,fittedvals,'r-')
-                            plt.title([p,R_neuopil_fit])
-                            plt.ylabel('F')
-                            plt.xlabel('neuropil')
-                            plt.show()
+# =============================================================================
+#                             plt.plot(Fneu_orig_filt[needed],F_orig_filt[needed],'ko')
+#                             plt.plot(neuropilvals,fittedvals,'r-')
+#                             plt.title([p,R_neuopil_fit])
+#                             plt.ylabel('F')
+#                             plt.xlabel('neuropil')
+#                             plt.show()
+# =============================================================================
                         else:
                             print('no part without activity, r_neu set to 0')
                             r_neu_now =0
@@ -331,7 +354,7 @@ bin_size = 1
 min_accomodation = 0.5
 max_baseline_dff = 1
 min_ap_frequency = 40 
-sensor = 'UF456'#'G7F'#'XCaMP'#
+sensor = 'XCaMP'#'G7F'#'UF456'#
 #cell_id ='20200322-anm472004-cell5'
 #cell_id ='20200417-anm472001-cell4'
 plot_stuff=True
@@ -349,6 +372,8 @@ amplitude_mean_AU = list()
 amplitude_std_AU = list()
 amplitude_median_AU = list()
 for apnum in np.unique(event_ap_num):
+    if apnum>1:
+        break
     #%
     #apnum=np.unique(event_ap_num)[1]
     try:
@@ -430,7 +455,7 @@ for apnum in np.unique(event_ap_num):
                             bin_mean.append(np.mean(y_conc[(x_conc>bin_center-bin_size/2) & (x_conc<bin_center+bin_size/2)]))
                         #break
                         #%
-                        risetime = 30
+                        risetime = 40
                         startidx = np.argmax(bin_centers>risetime)
                         xvals= bin_centers[startidx:]-bin_centers[startidx]
                         xvals_plot =bin_centers[startidx:]
@@ -494,7 +519,7 @@ for apnum in np.unique(event_ap_num):
                 ax_dff0_amplitude_local.set_xlabel('baseline dF/F')
                 ax_dff0_amplitude_local.set_ylabel('amplitude dF/F')
                 plt.show()
-                break
+                #break
     except:
         pass
 #%%
