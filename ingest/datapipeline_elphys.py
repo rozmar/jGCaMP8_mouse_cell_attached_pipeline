@@ -238,7 +238,7 @@ def populateelphys_wavesurfer():
             cells = cells[cell_order]
             df_session_metadata = pd.read_csv(dj.config['locations.metadata_surgery_experiment']+'{}-anm{}.csv'.format(session_dir.name[:8],subject_id))
             for cell,cell_number in zip(cells,cell_nums):
-                
+                dj.conn().ping()
                 try:
                     session = (experiment.Session() & 'subject_id = "'+str(sessiondata['subject_id'])+'"' & 'session_date = "'+str(sessiondata['session_date'])+'"').fetch('session')[0]
                 except: # session nonexistent
@@ -253,11 +253,7 @@ def populateelphys_wavesurfer():
                 if len(ephys_cell_attached.Cell() & celldata) > 0:
                     print('cell already uploaded: {}'.format(celldata))
                     continue
-                
-                
-                
-                #dj.conn().ping()
-                #%
+
                 ephisdata_cell = list()
                 sweepstarttimes = list()
                 cell_dir =  session_dir.joinpath(cell)
@@ -283,9 +279,7 @@ def populateelphys_wavesurfer():
                 sweepstarttimes = np.asarray(sweepstarttimes)[sweep_order]
                 ephisdata_cell = np.asarray(ephisdata_cell)[sweep_order]
                 
-                
-                    
-               
+
                 if len(ephisdata_cell) == 0 :
                     continue
                  # add session to DJ if not present
