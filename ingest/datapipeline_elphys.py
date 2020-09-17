@@ -238,6 +238,24 @@ def populateelphys_wavesurfer():
             cells = cells[cell_order]
             df_session_metadata = pd.read_csv(dj.config['locations.metadata_surgery_experiment']+'{}-anm{}.csv'.format(session_dir.name[:8],subject_id))
             for cell,cell_number in zip(cells,cell_nums):
+                
+                try:
+                    session = (experiment.Session() & 'subject_id = "'+str(sessiondata['subject_id'])+'"' & 'session_date = "'+str(sessiondata['session_date'])+'"').fetch('session')[0]
+                except: # session nonexistent
+                    session = 1
+                #add cell if not added already
+                #%
+                celldata= {
+                        'subject_id': subject_id,
+                        'session': session,
+                        'cell_number': int(cell_number),
+                        }
+                if len(ephys_cell_attached.Cell() & celldata) > 0:
+                    print('cell already uploaded: {}'.format(celldata))
+                    continue
+                
+                
+                
                 #dj.conn().ping()
                 #%
                 ephisdata_cell = list()
@@ -264,123 +282,162 @@ def populateelphys_wavesurfer():
                 sweep_order = np.argsort(sweepstarttimes)
                 sweepstarttimes = np.asarray(sweepstarttimes)[sweep_order]
                 ephisdata_cell = np.asarray(ephisdata_cell)[sweep_order]
-              
-                # add session to DJ if not present
-                if len(ephisdata_cell)> 0 :
-                    if len(experiment.Session() & 'subject_id = "'+str(sessiondata['subject_id'])+'"' & 'session_date = "'+str(sessiondata['session_date'])+'"') == 0:
-                        if len(experiment.Session() & 'subject_id = "'+str(sessiondata['subject_id'])+'"') == 0:
-                            sessiondata['session'] = 1
-                        else:
-                            sessiondata['session'] = len((experiment.Session() & 'subject_id = "'+str(sessiondata['subject_id'])+'"').fetch()['session']) + 1
-                        sessiondata['session_time'] = (sweepstarttimes[0]).strftime('%H:%M:%S') # the time of the first sweep will be the session time
-                        
-                        experiment.Session().insert1(sessiondata)
-                    session = (experiment.Session() & 'subject_id = "'+str(sessiondata['subject_id'])+'"' & 'session_date = "'+str(sessiondata['session_date'])+'"').fetch('session')[0]
-                    #add cell if not added already
-                    #%
-                    celldata= {
+                
+                
+                    
+               
+                if len(ephisdata_cell) == 0 :
+                    continue
+                 # add session to DJ if not present
+                if len(experiment.Session() & 'subject_id = "'+str(sessiondata['subject_id'])+'"' & 'session_date = "'+str(sessiondata['session_date'])+'"') == 0:
+                    if len(experiment.Session() & 'subject_id = "'+str(sessiondata['subject_id'])+'"') == 0:
+                        sessiondata['session'] = 1
+                    else:
+                        sessiondata['session'] = len((experiment.Session() & 'subject_id = "'+str(sessiondata['subject_id'])+'"').fetch()['session']) + 1
+                    sessiondata['session_time'] = (sweepstarttimes[0]).strftime('%H:%M:%S') # the time of the first sweep will be the session time
+                    
+                    experiment.Session().insert1(sessiondata)
+            
+# =============================================================================
+#                 if len(experiment.Session() & 'subject_id = "'+str(sessiondata['subject_id'])+'"' & 'session_date = "'+str(sessiondata['session_date'])+'"') == 0:
+#                     if len(experiment.Session() & 'subject_id = "'+str(sessiondata['subject_id'])+'"') == 0:
+#                         sessiondata['session'] = 1
+#                     else:
+#                         sessiondata['session'] = len((experiment.Session() & 'subject_id = "'+str(sessiondata['subject_id'])+'"').fetch()['session']) + 1
+#                     sessiondata['session_time'] = (sweepstarttimes[0]).strftime('%H:%M:%S') # the time of the first sweep will be the session time
+#                     
+#                     experiment.Session().insert1(sessiondata)
+#                 session = (experiment.Session() & 'subject_id = "'+str(sessiondata['subject_id'])+'"' & 'session_date = "'+str(sessiondata['session_date'])+'"').fetch('session')[0]
+#                 #add cell if not added already
+#                 #%
+#                 celldata= {
+#                         'subject_id': subject_id,
+#                         'session': session,
+#                         'cell_number': int(cell_number),
+#                         }
+#                 if len(ephys_cell_attached.Cell() & celldata) == 0:
+# =============================================================================
+                print('adding new recording:' )
+                print(celldata)
+                celldata['cell_type'] = 'unidentified' # no chance to say
+                #%
+                celldata['cell_recording_start'] = (sweepstarttimes[0]).strftime('%H:%M:%S')
+                #%
+                try:
+                    celldata['depth'] = np.mean(np.array(df_session_metadata.loc[df_session_metadata['Cell']==cell_number,'depth'].values,float))
+                except:
+                    celldata['depth']= -1
+                if np.isnan(celldata['depth']):
+                    celldata['depth']= -1
+                #ephys_cell_attached.Cell().insert1(celldata, allow_direct_insert=True)
+                #%
+                if 'cell notes' in df_session_metadata.keys():
+                    cellnotes = ' - '.join(np.asarray(df_session_metadata.loc[df_session_metadata['Cell']==cell_number,'cell notes'].values,str))
+                else:
+                    cellnotes = ''
+                cellnotesdata = {
+                        'subject_id': subject_id,
+                        'session': session,
+                        'cell_number': cell_number,
+                        'notes': cellnotes
+                        }                            
+                #ephys_cell_attached.CellNotes().insert1(cellnotesdata, allow_direct_insert=True)
+
+                #%
+                Sweep_list = list()
+                SweepMetadata_list = list()
+                SweepResponse_list = list()
+                SweepImagingExposure_list = list()
+                SweepStimulus_list = list()
+                SweepVisualStimulus_list = list()
+                for i, ephisdata in enumerate(ephisdata_cell):
+                    
+                        #%
+                    sweep_number = i
+                    sweep_data = {
                             'subject_id': subject_id,
                             'session': session,
-                            'cell_number': int(cell_number),
+                            'cell_number': cell_number,
+                            'sweep_number': sweep_number,
+                            'sweep_start_time':(ephisdata['sweepstarttime']-sweepstarttimes[0]).total_seconds(),
+                            'sweep_end_time': (ephisdata['sweepstarttime']-sweepstarttimes[0]).total_seconds()+ephisdata['time'][-1],
+                            'protocol_name': ephisdata['filename'][:-3],
+                            'protocol_sweep_number': 1
                             }
-                    if len(ephys_cell_attached.Cell() & celldata) == 0:
-                        print('adding new recording:' )
-                        print(celldata)
-                        celldata['cell_type'] = 'unidentified' # no chance to say
-                        #%
-                        celldata['cell_recording_start'] = (sweepstarttimes[0]).strftime('%H:%M:%S')
-                        #%
-                        try:
-                            celldata['depth'] = np.mean(np.array(df_session_metadata.loc[df_session_metadata['Cell']==cell_number,'depth'].values,float))
-                        except:
-                            celldata['depth']= -1
-                        if np.isnan(celldata['depth']):
-                            celldata['depth']= -1
-                        ephys_cell_attached.Cell().insert1(celldata, allow_direct_insert=True)
-                        #%
-                        if 'cell notes' in df_session_metadata.keys():
-                            cellnotes = ' - '.join(np.asarray(df_session_metadata.loc[df_session_metadata['Cell']==cell_number,'cell notes'].values,str))
-                        else:
-                            cellnotes = ''
-                        cellnotesdata = {
-                                'subject_id': subject_id,
-                                'session': session,
-                                'cell_number': cell_number,
-                                'notes': cellnotes
-                                }                            
-                        ephys_cell_attached.CellNotes().insert1(cellnotesdata, allow_direct_insert=True)
+                    #%
+                    if ephisdata['metadata']['recording_mode'] == 'CC':
+                        recording_mode = 'current clamp'
+                    else:
+                        recording_mode = 'voltage clamp'
 
-                        #%
-                        for i, ephisdata in enumerate(ephisdata_cell):
-                            
-                                #%
-                            sweep_number = i
-                            sweep_data = {
-                                    'subject_id': subject_id,
-                                    'session': session,
-                                    'cell_number': cell_number,
-                                    'sweep_number': sweep_number,
-                                    'sweep_start_time':(ephisdata['sweepstarttime']-sweepstarttimes[0]).total_seconds(),
-                                    'sweep_end_time': (ephisdata['sweepstarttime']-sweepstarttimes[0]).total_seconds()+ephisdata['time'][-1],
-                                    'protocol_name': ephisdata['filename'][:-3],
-                                    'protocol_sweep_number': 1
-                                    }
-                            #%
-                            if ephisdata['metadata']['recording_mode'] == 'CC':
-                                recording_mode = 'current clamp'
-                            else:
-                                recording_mode = 'voltage clamp'
+                    sweepmetadata_data = {
+                            'subject_id': subject_id,
+                            'session': session,
+                            'cell_number': cell_number,
+                            'sweep_number': sweep_number,
+                            'recording_mode': recording_mode,
+                            'sample_rate': ephisdata['metadata']['sRate']
+                            }
+                    sweepdata_data = {
+                            'subject_id': subject_id,
+                            'session': session,
+                            'cell_number': cell_number,
+                            'sweep_number': sweep_number,
+                            'response_trace': ephisdata['response_trace'],
+                            'response_units': ephisdata['response_trace_unit']
+                            }
+                    Sweep_list.append(sweep_data)
+                    SweepMetadata_list.append(sweepmetadata_data)
+                    SweepResponse_list.append(sweepdata_data)
+# =============================================================================
+#                         ephys_cell_attached.Sweep().insert1(sweep_data, allow_direct_insert=True)
+#                         ephys_cell_attached.SweepMetadata().insert1(sweepmetadata_data, allow_direct_insert=True)
+#                         ephys_cell_attached.SweepResponse().insert1(sweepdata_data, allow_direct_insert=True)
+# =============================================================================
 
-                            sweepmetadata_data = {
-                                    'subject_id': subject_id,
-                                    'session': session,
-                                    'cell_number': cell_number,
-                                    'sweep_number': sweep_number,
-                                    'recording_mode': recording_mode,
-                                    'sample_rate': ephisdata['metadata']['sRate']
-                                    }
-                            sweepdata_data = {
-                                    'subject_id': subject_id,
-                                    'session': session,
-                                    'cell_number': cell_number,
-                                    'sweep_number': sweep_number,
-                                    'response_trace': ephisdata['response_trace'],
-                                    'response_units': ephisdata['response_trace_unit']
-                                    }
-                            ephys_cell_attached.Sweep().insert1(sweep_data, allow_direct_insert=True)
-                            ephys_cell_attached.SweepMetadata().insert1(sweepmetadata_data, allow_direct_insert=True)
-                            ephys_cell_attached.SweepResponse().insert1(sweepdata_data, allow_direct_insert=True)
-
-                            #%
-                            if 'frame_trigger' in ephisdata.keys():
-                                sweepimagingexposuredata = {
-                                    'subject_id': subject_id,
-                                    'session': session,
-                                    'cell_number': cell_number,
-                                    'sweep_number': sweep_number,
-                                    'imaging_exposure_trace' :  ephisdata['frame_trigger']
-                                    }
-                                ephys_cell_attached.SweepImagingExposure().insert1(sweepimagingexposuredata, allow_direct_insert=True)
-                            if 'stimulus_trace' in ephisdata.keys() and not type(ephisdata['stimulus_trace']) == type(None):
-                                sweepstimulusdata = {
-                                    'subject_id': subject_id,
-                                    'session': session,
-                                    'cell_number': cell_number,
-                                    'sweep_number': sweep_number,
-                                    'stimulus_trace' :  ephisdata['stimulus_trace'],
-                                    'stimulus_units' :  ephisdata['stimulus_trace_unit']
-                                    }
-                                ephys_cell_attached.SweepStimulus().insert1(sweepstimulusdata, allow_direct_insert=True)
-                                
-                            if 'visual_stim_trace' in ephisdata.keys() and not type(ephisdata['visual_stim_trace']) == type(None):
-                                visualstimulusdata = {
-                                    'subject_id': subject_id,
-                                    'session': session,
-                                    'cell_number': cell_number,
-                                    'sweep_number': sweep_number,
-                                    'visual_stimulus_trace' :  ephisdata['visual_stim_trace']
-                                    }
-                                ephys_cell_attached.SweepVisualStimulus().insert1(visualstimulusdata, allow_direct_insert=True)
-                            
+                    #%
+                    if 'frame_trigger' in ephisdata.keys():
+                        sweepimagingexposuredata = {
+                            'subject_id': subject_id,
+                            'session': session,
+                            'cell_number': cell_number,
+                            'sweep_number': sweep_number,
+                            'imaging_exposure_trace' :  ephisdata['frame_trigger']
+                            }
+                        SweepImagingExposure_list.append(sweepimagingexposuredata)
+                        #ephys_cell_attached.SweepImagingExposure().insert1(sweepimagingexposuredata, allow_direct_insert=True)
+                    if 'stimulus_trace' in ephisdata.keys() and not type(ephisdata['stimulus_trace']) == type(None):
+                        sweepstimulusdata = {
+                            'subject_id': subject_id,
+                            'session': session,
+                            'cell_number': cell_number,
+                            'sweep_number': sweep_number,
+                            'stimulus_trace' :  ephisdata['stimulus_trace'],
+                            'stimulus_units' :  ephisdata['stimulus_trace_unit']
+                            }
+                        SweepStimulus_list.append(sweepstimulusdata)
+                        #ephys_cell_attached.SweepStimulus().insert1(sweepstimulusdata, allow_direct_insert=True)
+                        
+                    if 'visual_stim_trace' in ephisdata.keys() and not type(ephisdata['visual_stim_trace']) == type(None):
+                        visualstimulusdata = {
+                            'subject_id': subject_id,
+                            'session': session,
+                            'cell_number': cell_number,
+                            'sweep_number': sweep_number,
+                            'visual_stimulus_trace' :  ephisdata['visual_stim_trace']
+                            }
+                        SweepVisualStimulus_list.append(visualstimulusdata)
+                        #ephys_cell_attached.SweepVisualStimulus().insert1(visualstimulusdata, allow_direct_insert=True)
+                
+                with dj.conn().transaction: #inserting one cell
+                    print('uploading to datajoint')
+                    ephys_cell_attached.Cell().insert1(celldata, allow_direct_insert=True)
+                    ephys_cell_attached.CellNotes().insert1(cellnotesdata, allow_direct_insert=True)
+                    ephys_cell_attached.Sweep().insert(Sweep_list, allow_direct_insert=True)
+                    ephys_cell_attached.SweepMetadata().insert(SweepMetadata_list, allow_direct_insert=True)
+                    ephys_cell_attached.SweepResponse().insert(SweepResponse_list, allow_direct_insert=True)
+                    ephys_cell_attached.SweepImagingExposure().insert(SweepImagingExposure_list, allow_direct_insert=True)
+                    ephys_cell_attached.SweepStimulus().insert(SweepStimulus_list, allow_direct_insert=True)
+                    ephys_cell_attached.SweepVisualStimulus().insert(SweepVisualStimulus_list, allow_direct_insert=True)
 
 
