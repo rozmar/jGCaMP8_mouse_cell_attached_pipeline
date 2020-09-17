@@ -70,29 +70,45 @@ import time
     #%%
     
 def load_wavesurfer_file(WS_path): # works only for single sweep files
-    #%
+    #%%
     ws_data = ws.loadDataFile(filename=WS_path, format_string='double' )
     units = np.array(ws_data['header']['AIChannelUnits']).astype(str)
     channelnames = np.array(ws_data['header']['AIChannelNames']).astype(str)
     commandchannel = np.asarray(ws_data['header']['AOChannelNames'],str) =='Command'
     commandunit = np.asarray(ws_data['header']['AOChannelUnits'],str)[np.where(commandchannel)[0][0]]
-    if 'A' in commandunit:
+    if 'Primary' in channelnames:
+        ephysidx = (channelnames == 'Primary').argmax()
+    elif 'Voltage' in channelnames:
         ephysidx = (channelnames == 'Voltage').argmax()
+    else:
+        print('cannot find primary ephys trace - FIX ME: {}'.format(WS_path))
+   
+    if 'Command' in channelnames:
+        stimidx = (channelnames == 'Command').argmax()
+    elif 'Secondary' in channelnames:
+        stimidx = (channelnames == 'Secondary').argmax()
+    else:
+        print('no stimulus found')
+        stimidx = np.nan
+    
+        
+    if 'A' in commandunit:
         recording_mode = 'CC'
     else:
-        ephysidx = (channelnames == 'Current').argmax()
         recording_mode = 'VC'
-    framatimesidx = (channelnames == 'FrameTrigger').argmax()
     
     keys = list(ws_data.keys())
     del keys[keys=='header']
     if len(keys)>1:
-        print('MULTIPLE SWEEPS! HANDLE ME!!')
-        timer.sleep(1000)
+        print('MULTIPLE SWEEPS! HANDLE ME!! : {}'.format(WS_path))
+        timer.sleep(10000)
     sweep = ws_data[keys[0]]
     sRate = ws_data['header']['AcquisitionSampleRate'][0][0]
     voltage = sweep['analogScans'][ephysidx,:]
-   
+    if not np.isnan(stimidx):
+        stimulus = sweep['analogScans'][stimidx,:]
+    else:
+        stimulus = None
     if units[ephysidx] == 'mV':
         voltage =voltage/1000
         units[ephysidx] = 'V'
@@ -101,17 +117,50 @@ def load_wavesurfer_file(WS_path): # works only for single sweep files
         units[ephysidx] = 'A'
     if units[ephysidx] == 'nA':
         voltage =voltage/10**9
-        units[ephysidx] = 'A'   
+        units[ephysidx] = 'A' 
+        
+    if not np.isnan(stimidx) and units[stimidx] == 'V' and recording_mode == 'CC': # HOTFIX wavesurfer doesn't save stimulus in current clamp mode..
+        units[stimidx] = 'A'
+        stimulus= stimulus/10**9
+    elif not np.isnan(stimidx) and units[stimidx] == 'mV' and recording_mode == 'CC': # HOTFIX wavesurfer doesn't save stimulus in current clamp mode..
+        units[stimidx] = 'A'
+        stimulus= stimulus/10**12
+    elif not np.isnan(stimidx) and units[stimidx] == 'pA':
+        stimulus =stimulus/10**12
+        units[stimidx] = 'A'
+    elif not np.isnan(stimidx) and units[stimidx] == 'nA':
+        stimulus =stimulus/10**9
+        units[stimidx] = 'A' 
 
+    frametimesidx = (channelnames == 'FrameTrigger').argmax()
+    frame_trigger = sweep['analogScans'][frametimesidx,:]
+    if 'VisualStimulus' in channelnames:
+        visualstimidx = (channelnames == 'VisualStimulus').argmax()
+        visual_stim_trace = sweep['analogScans'][visualstimidx,:]
+    else:
+        visual_stim_trace = None
     
-    frame_trigger = sweep['analogScans'][framatimesidx,:]
     timestamp = ws_data['header']['ClockAtRunStart']
-    #%
-    return voltage, frame_trigger, sRate, recording_mode, timestamp  , units[ephysidx]
+    if not np.isnan(stimidx):
+        stimunit =units[stimidx]
+    else:
+        stimunit= None
+    outdict = {'response_trace':voltage,
+               'stimulus_trace':stimulus,
+               'sampling_rate':sRate,
+               'recording_mode':recording_mode,
+               'timestamp':timestamp,
+               'response_trace_unit':units[ephysidx],
+               'stimulus_trace_unit':stimunit,
+               'visual_stim_trace':visual_stim_trace,
+               'frame_trigger':frame_trigger}
+    
+    #%%
+    return outdict#voltage, frame_trigger, sRate, recording_mode, timestamp  , units[ephysidx]
 #%%
 def populateelphys_wavesurfer():
   #%%
-    df_subject_wr_sessions=pd.DataFrame(lab.WaterRestriction() * experiment.Session() * experiment.SessionDetails)
+    df_subject_wr_sessions=pd.DataFrame(lab.WaterRestriction() * experiment.Session())# * experiment.SessionDetails
     df_subject_ids = pd.DataFrame(lab.Subject())
     if len(df_subject_wr_sessions)>0:
         subject_names = df_subject_wr_sessions['water_restriction_number'].unique()
@@ -169,13 +218,15 @@ def populateelphys_wavesurfer():
             cell_nums = list()
             cell_is_dir = list()
             for cell in cells:
+# =============================================================================
+#                 try:
+#                     cell_nums.append(int(re.findall(r'cell.\d+', cell)[0][5:]))
+#                 except:
+# =============================================================================
                 try:
-                    cell_nums.append(int(re.findall(r'cell.\d+', cell)[0][5:]))
+                    cell_nums.append(int(re.findall(r'cell\d+', cell.lower())[0][4:]))
                 except:
-                    try:
-                        cell_nums.append(int(re.findall(r'cell\d+', cell)[0][4:]))
-                    except:
-                        cell_nums.append(np.nan)
+                    cell_nums.append(np.nan)
                 cell_is_dir.append((session_dir/cell).is_dir())
             cells = np.array(cells)[~np.array(np.isnan(cell_nums)) & cell_is_dir]
             cell_nums = np.array(cell_nums)[~np.array(np.isnan(cell_nums))& cell_is_dir]
@@ -187,6 +238,7 @@ def populateelphys_wavesurfer():
             cells = cells[cell_order]
             df_session_metadata = pd.read_csv(dj.config['locations.metadata_surgery_experiment']+'{}-anm{}.csv'.format(session_dir.name[:8],subject_id))
             for cell,cell_number in zip(cells,cell_nums):
+                #dj.conn().ping()
                 #%
                 ephisdata_cell = list()
                 sweepstarttimes = list()
@@ -197,20 +249,17 @@ def populateelphys_wavesurfer():
                     if '.h5' in ephysfile:
                         ephysfiles_real.append(ephysfile)
                 for ephysfile in ephysfiles_real:
-                    voltage, frame_trigger, sRate, recording_mode, timestamp, response_unit = load_wavesurfer_file(cell_dir.joinpath(ephysfile))
-                    metadata = {'sRate':sRate,
-                                'recording_mode':recording_mode}
-                    ephisdata = dict()
-                    ephisdata['response']=voltage
-                    ephisdata['response_unit']=response_unit
-                    ephisdata['time']=np.arange(len(voltage))/sRate
-                    ephisdata['stim']=np.nan
-                    ephisdata['metadata']=metadata
-                    ephisdata['sweepstarttime']= datetime.datetime(timestamp[0],timestamp[1],timestamp[2],timestamp[3],timestamp[4],int(timestamp[5]),(timestamp[5]-int(timestamp[5]))*10**6)
-                    ephisdata['filename']= ephysfile
-                    ephisdata['frame_trigger'] = frame_trigger
-                    sweepstarttimes.append(ephisdata['sweepstarttime'])
-                    ephisdata_cell.append(ephisdata)
+                    ephysdata = load_wavesurfer_file(cell_dir.joinpath(ephysfile))#voltage, frame_trigger, sRate, recording_mode, timestamp, response_unit
+                    timestamp = ephysdata['timestamp']
+                    metadata = {'sRate':ephysdata['sampling_rate'],
+                                'recording_mode':ephysdata['recording_mode']}
+                    #ephisdata = dict()
+                    ephysdata['time']=np.arange(len(ephysdata['response_trace']))/ephysdata['sampling_rate']
+                    ephysdata['metadata']=metadata
+                    ephysdata['sweepstarttime']= datetime.datetime(timestamp[0],timestamp[1],timestamp[2],timestamp[3],timestamp[4],int(timestamp[5]),(timestamp[5]-int(timestamp[5]))*10**6)
+                    ephysdata['filename']= ephysfile
+                    sweepstarttimes.append(ephysdata['sweepstarttime'])
+                    ephisdata_cell.append(ephysdata)
                     
                 sweep_order = np.argsort(sweepstarttimes)
                 sweepstarttimes = np.asarray(sweepstarttimes)[sweep_order]
@@ -250,7 +299,7 @@ def populateelphys_wavesurfer():
                         ephys_cell_attached.Cell().insert1(celldata, allow_direct_insert=True)
                         #%
                         if 'cell notes' in df_session_metadata.keys():
-                            cellnotes = ' - '.join(df_session_metadata.loc[df_session_metadata['Cell']==cell_number,'cell notes'].values)
+                            cellnotes = ' - '.join(np.asarray(df_session_metadata.loc[df_session_metadata['Cell']==cell_number,'cell notes'].values,str))
                         else:
                             cellnotes = ''
                         cellnotesdata = {
@@ -295,8 +344,8 @@ def populateelphys_wavesurfer():
                                     'session': session,
                                     'cell_number': cell_number,
                                     'sweep_number': sweep_number,
-                                    'response_trace': ephisdata['response'],
-                                    'response_units': ephisdata['response_unit']
+                                    'response_trace': ephisdata['response_trace'],
+                                    'response_units': ephisdata['response_trace_unit']
                                     }
                             ephys_cell_attached.Sweep().insert1(sweep_data, allow_direct_insert=True)
                             ephys_cell_attached.SweepMetadata().insert1(sweepmetadata_data, allow_direct_insert=True)
@@ -312,6 +361,26 @@ def populateelphys_wavesurfer():
                                     'imaging_exposure_trace' :  ephisdata['frame_trigger']
                                     }
                                 ephys_cell_attached.SweepImagingExposure().insert1(sweepimagingexposuredata, allow_direct_insert=True)
-
+                            if 'stimulus_trace' in ephisdata.keys() and not type(ephisdata['stimulus_trace']) == type(None):
+                                sweepstimulusdata = {
+                                    'subject_id': subject_id,
+                                    'session': session,
+                                    'cell_number': cell_number,
+                                    'sweep_number': sweep_number,
+                                    'stimulus_trace' :  ephisdata['stimulus_trace'],
+                                    'stimulus_units' :  ephisdata['stimulus_trace_unit']
+                                    }
+                                ephys_cell_attached.SweepStimulus().insert1(sweepstimulusdata, allow_direct_insert=True)
+                                
+                            if 'visual_stim_trace' in ephisdata.keys() and not type(ephisdata['visual_stim_trace']) == type(None):
+                                visualstimulusdata = {
+                                    'subject_id': subject_id,
+                                    'session': session,
+                                    'cell_number': cell_number,
+                                    'sweep_number': sweep_number,
+                                    'visual_stimulus_trace' :  ephisdata['visual_stim_trace']
+                                    }
+                                ephys_cell_attached.SweepVisualStimulus().insert1(visualstimulusdata, allow_direct_insert=True)
+                            
 
 
