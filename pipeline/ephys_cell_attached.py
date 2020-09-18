@@ -15,7 +15,7 @@ schema = dj.schema(get_schema_name('ephys_cell_attached'),locals())
 
 
 @schema
-class CellType(dj.Lookup):
+class CellType(dj.Lookup): #PUTATIVE cell type based on first impression
     definition = """
     #
     cell_type  :  varchar(100)
@@ -37,8 +37,8 @@ class Cell(dj.Imported):
     cell_number: smallint
     ---
     -> CellType
-    depth: smallint # microns from the surface of the brain
-    cell_recording_start: time #time at the start of the first sweep
+    depth = NULL         : smallint # microns from the surface of the brain
+    cell_recording_start : time #time at the start of the first sweep
     """
 
 @schema
