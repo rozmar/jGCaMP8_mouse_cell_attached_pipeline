@@ -11,17 +11,16 @@ import re
 from pywavesurfer import ws
 dj.conn()
 from pipeline import pipeline_tools
-from pipeline import lab, experiment, ephys_cell_attached #, ephysanal, imaging
+from pipeline import lab, experiment, ephys_cell_attached,ephysanal_cell_attached #, ephysanal, imaging
 import time
-#import ray
+import ray
 
+#%%
+@ray.remote
+def populatemytables_core_paralel(arguments,runround):
+    if runround == 1:
+        ephysanal_cell_attached.SweepFrameTimes().populate(**arguments)
 # =============================================================================
-# #%%
-# @ray.remote
-# def populatemytables_core_paralel(arguments,runround):
-#     if runround == 1:
-#         ephysanal.SquarePulse().populate(**arguments)
-#         ephysanal.SweepFrameTimes().populate(**arguments)
 #     elif runround == 2:
 #         ephysanal.SquarePulseSeriesResistance().populate(**arguments)
 #         ephysanal.SweepSeriesResistance().populate(**arguments)
@@ -30,12 +29,13 @@ import time
 #     elif runround == 4:
 #         ephysanal.ActionPotential().populate(**arguments)
 #         ephysanal.ActionPotentialDetails().populate(**arguments)
-#         
-# 
-# def populatemytables_core(arguments,runround):
-#     if runround == 1:
-#         ephysanal.SquarePulse().populate(**arguments)
-#         ephysanal.SweepFrameTimes().populate(**arguments)
+# =============================================================================
+        
+
+def populatemytables_core(arguments,runround):
+    if runround == 1:
+        ephysanal_cell_attached.SweepFrameTimes().populate(**arguments)
+# =============================================================================
 #     elif runround == 2:
 #         ephysanal.SquarePulseSeriesResistance().populate(**arguments)
 #         ephysanal.SweepSeriesResistance().populate(**arguments)
@@ -45,27 +45,27 @@ import time
 #     elif runround == 4:
 #         ephysanal.ActionPotential().populate(**arguments)
 #         ephysanal.ActionPotentialDetails().populate(**arguments)
-#         
-# def populatemytables(paralel=True,cores = 9):
-#     if paralel:
-#         ray.init(num_cpus = cores)
-#         for runround in [1,2,3,4]:
-#             arguments = {'display_progress' : False, 'reserve_jobs' : True,'order' : 'random'}
-#             print('round '+str(runround)+' of populate')
-#             result_ids = []
-#             for coreidx in range(cores):
-#                 result_ids.append(populatemytables_core_paralel.remote(arguments,runround))        
-#             ray.get(result_ids)
-#             arguments = {'display_progress' : True, 'reserve_jobs' : False}
-#             populatemytables_core(arguments,runround)
-#             
-#         ray.shutdown()
-#     else:
-#         for runround in [1,2,3,4]:
-#             arguments = {'display_progress' : True, 'reserve_jobs' : False}
-#             populatemytables_core(arguments,runround)
-# 
 # =============================================================================
+        
+def populatemytables(paralel=True,cores = 9):
+    if paralel:
+        ray.init(num_cpus = cores)
+        for runround in [1,2,3,4]:
+            arguments = {'display_progress' : False, 'reserve_jobs' : True,'order' : 'random'}
+            print('round '+str(runround)+' of populate')
+            result_ids = []
+            for coreidx in range(cores):
+                result_ids.append(populatemytables_core_paralel.remote(arguments,runround))        
+            ray.get(result_ids)
+            arguments = {'display_progress' : True, 'reserve_jobs' : False}
+            populatemytables_core(arguments,runround)
+            
+        ray.shutdown()
+    else:
+        for runround in [1,2,3,4]:
+            arguments = {'display_progress' : True, 'reserve_jobs' : False}
+            populatemytables_core(arguments,runround)
+
     
     #%%
     
@@ -236,13 +236,16 @@ def populateelphys_wavesurfer():
             cell_order = np.argsort(cell_nums)
             cell_nums = cell_nums[cell_order]
             cells = cells[cell_order]
+           # print('cells: {}, cellnums: {}'.format(cells,cell_nums))
             df_session_metadata = pd.read_csv(dj.config['locations.metadata_surgery_experiment']+'{}-anm{}.csv'.format(session_dir.name[:8],subject_id))
+            cell_data_list = list()
+            cell_start_times_list = list()
             for cell,cell_number in zip(cells,cell_nums):
                 dj.conn().ping()
                 try:
                     session = (experiment.Session() & 'subject_id = "'+str(sessiondata['subject_id'])+'"' & 'session_date = "'+str(sessiondata['session_date'])+'"').fetch('session')[0]
                 except: # session nonexistent
-                    session = 1
+                    session = len((experiment.Session() & 'subject_id = "'+str(sessiondata['subject_id'])+'"').fetch('session')) +1
                 #add cell if not added already
                 #%
                 celldata= {
@@ -263,7 +266,11 @@ def populateelphys_wavesurfer():
                     if '.h5' in ephysfile:
                         ephysfiles_real.append(ephysfile)
                 for ephysfile in ephysfiles_real:
-                    ephysdata = load_wavesurfer_file(cell_dir.joinpath(ephysfile))#voltage, frame_trigger, sRate, recording_mode, timestamp, response_unit
+                    try:
+                        ephysdata = load_wavesurfer_file(cell_dir.joinpath(ephysfile))#voltage, frame_trigger, sRate, recording_mode, timestamp, response_unit
+                    except OSError:
+                        print('file not readable, skipping: {}'.format(cell_dir.joinpath(ephysfile)))
+                        continue
                     timestamp = ephysdata['timestamp']
                     metadata = {'sRate':ephysdata['sampling_rate'],
                                 'recording_mode':ephysdata['recording_mode']}
@@ -283,15 +290,7 @@ def populateelphys_wavesurfer():
                 if len(ephisdata_cell) == 0 :
                     continue
                  # add session to DJ if not present
-                if len(experiment.Session() & 'subject_id = "'+str(sessiondata['subject_id'])+'"' & 'session_date = "'+str(sessiondata['session_date'])+'"') == 0:
-                    if len(experiment.Session() & 'subject_id = "'+str(sessiondata['subject_id'])+'"') == 0:
-                        sessiondata['session'] = 1
-                    else:
-                        sessiondata['session'] = len((experiment.Session() & 'subject_id = "'+str(sessiondata['subject_id'])+'"').fetch()['session']) + 1
-                    sessiondata['session_time'] = (sweepstarttimes[0]).strftime('%H:%M:%S') # the time of the first sweep will be the session time
-                    
-                    experiment.Session().insert1(sessiondata)
-            
+
 # =============================================================================
 #                 if len(experiment.Session() & 'subject_id = "'+str(sessiondata['subject_id'])+'"' & 'session_date = "'+str(sessiondata['session_date'])+'"') == 0:
 #                     if len(experiment.Session() & 'subject_id = "'+str(sessiondata['subject_id'])+'"') == 0:
@@ -313,16 +312,28 @@ def populateelphys_wavesurfer():
 # =============================================================================
                 print('adding new recording:' )
                 print(celldata)
-                celldata['cell_type'] = 'unidentified' # no chance to say
+                try:
+                    celltype = np.array(df_session_metadata.loc[df_session_metadata['Cell']==cell_number,'cell type'].values,str)[0]
+                except:
+                    celltype = 'unknown'
+                        
+                print(celltype)
+                if 'pyr' in celltype.lower():
+                    celldata['cell_type'] ='pyr'
+                elif 'int' in celltype.lower() or 'fs' in celltype.lower():
+                    celldata['cell_type'] ='int'
+                else:
+                    celldata['cell_type'] = 'unidentified' # no chance to say
                 #%
                 celldata['cell_recording_start'] = (sweepstarttimes[0]).strftime('%H:%M:%S')
                 #%
                 try:
-                    celldata['depth'] = np.mean(np.array(df_session_metadata.loc[df_session_metadata['Cell']==cell_number,'depth'].values,float))
+                    celldata['depth'] = np.nanmean(np.array(df_session_metadata.loc[df_session_metadata['Cell']==cell_number,'depth'].values,float))
                 except:
-                    celldata['depth']= -1
-                if np.isnan(celldata['depth']):
-                    celldata['depth']= -1
+                    celldata['depth']= None
+                    
+                if celldata['depth'] == None or np.isnan(celldata['depth']):
+                    celldata['depth']= None
                 #ephys_cell_attached.Cell().insert1(celldata, allow_direct_insert=True)
                 #%
                 if 'cell notes' in df_session_metadata.keys():
@@ -422,16 +433,46 @@ def populateelphys_wavesurfer():
                             }
                         SweepVisualStimulus_list.append(visualstimulusdata)
                         #ephys_cell_attached.SweepVisualStimulus().insert1(visualstimulusdata, allow_direct_insert=True)
-                
+                cell_data = {'celldata':celldata,
+                             'cellnotesdata':cellnotesdata,
+                             'Sweep_list':Sweep_list,
+                             'SweepMetadata_list':SweepMetadata_list,
+                             'SweepResponse_list':SweepResponse_list,
+                             'SweepImagingExposure_list':SweepImagingExposure_list,
+                             'SweepStimulus_list':SweepStimulus_list,
+                             'SweepVisualStimulus_list':SweepVisualStimulus_list}
+                cell_data_list.append(cell_data)
+                cell_start_times_list.append(celldata['cell_recording_start'])
+            
+            #%
+            if len(cell_data_list) == 0:#nothing to insert
+                continue
+            if len(experiment.Session() & 'subject_id = "'+str(sessiondata['subject_id'])+'"' & 'session_date = "'+str(sessiondata['session_date'])+'"') == 0:
+                if len(experiment.Session() & 'subject_id = "'+str(sessiondata['subject_id'])+'"') == 0:
+                    sessiondata['session'] = 1
+                else:
+                    sessiondata['session'] = len((experiment.Session() & 'subject_id = "'+str(sessiondata['subject_id'])+'"').fetch()['session']) + 1
+                sessiondata['session_time'] = np.sort(cell_start_times_list)[0]#(sweepstarttimes[0]).strftime('%H:%M:%S') # the time of the first sweep will be the session time
+                experiment.Session().insert1(sessiondata)
+            for cell_data in cell_data_list:
+                dj.conn().ping()
                 with dj.conn().transaction: #inserting one cell
-                    print('uploading to datajoint')
-                    ephys_cell_attached.Cell().insert1(celldata, allow_direct_insert=True)
-                    ephys_cell_attached.CellNotes().insert1(cellnotesdata, allow_direct_insert=True)
-                    ephys_cell_attached.Sweep().insert(Sweep_list, allow_direct_insert=True)
-                    ephys_cell_attached.SweepMetadata().insert(SweepMetadata_list, allow_direct_insert=True)
-                    ephys_cell_attached.SweepResponse().insert(SweepResponse_list, allow_direct_insert=True)
-                    ephys_cell_attached.SweepImagingExposure().insert(SweepImagingExposure_list, allow_direct_insert=True)
-                    ephys_cell_attached.SweepStimulus().insert(SweepStimulus_list, allow_direct_insert=True)
-                    ephys_cell_attached.SweepVisualStimulus().insert(SweepVisualStimulus_list, allow_direct_insert=True)
+                    print('uploading to datajoint: {}'.format(cell_data['celldata']))
+                    ephys_cell_attached.Cell().insert1(cell_data['celldata'], allow_direct_insert=True)
+                    dj.conn().ping()
+                    ephys_cell_attached.CellNotes().insert1(cell_data['cellnotesdata'], allow_direct_insert=True)
+                    dj.conn().ping()
+                    ephys_cell_attached.Sweep().insert(cell_data['Sweep_list'], allow_direct_insert=True)
+                    dj.conn().ping()
+                    ephys_cell_attached.SweepMetadata().insert(cell_data['SweepMetadata_list'], allow_direct_insert=True)
+                    dj.conn().ping()
+                    ephys_cell_attached.SweepResponse().insert(cell_data['SweepResponse_list'], allow_direct_insert=True)
+                    dj.conn().ping()
+                    ephys_cell_attached.SweepImagingExposure().insert(cell_data['SweepImagingExposure_list'], allow_direct_insert=True)
+                    dj.conn().ping()
+                    ephys_cell_attached.SweepStimulus().insert(cell_data['SweepStimulus_list'], allow_direct_insert=True)
+                    dj.conn().ping()
+                    ephys_cell_attached.SweepVisualStimulus().insert(cell_data['SweepVisualStimulus_list'], allow_direct_insert=True)
+                    dj.conn().ping()
 
 
