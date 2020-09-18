@@ -34,8 +34,7 @@ class MovieMetaData(dj.Imported):
     definition = """
     -> Movie
     ---
-    movie_hbeam_power                     : decimal (5,2)         # power percent
-    movie_power                           : decimal(5,2)          # power after objective in mW - calculated
+    movie_hbeam_power                     : decimal(5,2)         # power percent
     movie_hmotors_sample_x                : decimal(6,2)          # sample location in microns
     movie_hmotors_sample_y                : decimal(6,2)          # sample location in microns
     movie_hmotors_sample_z                : decimal(6,2)          # sample location in microns
@@ -47,7 +46,15 @@ class MovieMetaData(dj.Imported):
     movie_hscan2d_mask                    : blob                  #
     movie_hscan2d_scanmode                : varchar(50)           # resonant/...
     """ 
-   
+
+@schema
+class MoviePowerPostObjective(dj.Imported):
+    definition = """
+    -> Movie
+    ---
+    movie_power                           : decimal(6,2)          # power after objective in mW - calculated
+    """ 
+    
 @schema
 class MovieFrameTimes(dj.Imported):
     definition = """
