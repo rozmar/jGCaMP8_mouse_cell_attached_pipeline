@@ -17,7 +17,7 @@ from utils_pipeline import extract_scanimage_metadata, extract_files_from_dir
 import time
 
 homefolder = dj.config['locations.mr_share']
-
+#%%
 def upload_movie_metadata_scanimage():   
 #%%             
     repository = 'mr_share'
@@ -147,10 +147,20 @@ def upload_movie_metadata_scanimage_core(movie_dir_now,key,repository,repodir): 
         cell_start_time = (session_datetime-cell_datetime).total_seconds() # in seconds relative to session start
         frametimes = (ephysanal_cell_attached.SweepFrameTimes()&key_cell&'sweep_number={}'.format(sweep_num)).fetch1('frame_time')
         frametimes = frametimes[:movie_frame_num]+cell_start_time # from session start
+        if not (movie_frame_num == sum(frame_count) or movie_frame_num == sum(frame_count)/2):
+            print('movie frame count not consistent with metadata, aborting {}'.format(basename))
+            continue
         if movie_frame_num > len(frametimes):
             print('not enough frametimes..WTF?!')
-            continue
+            #continue
             time.sleep(10000)
+            #%%
+# =============================================================================
+#             frames_trace = (ephys_cell_attached.SweepImagingExposure()&key_cell&'sweep_number={}'.format(sweep_num)).fetch1('imaging_exposure_trace')
+#             frameidxes = (ephysanal_cell_attached.SweepFrameTimes()&key_cell&'sweep_number={}'.format(sweep_num)).fetch1('frame_idx')
+#             plt.plot(frames_trace);plt.plot(frameidxes,frames_trace[frameidxes],'ro')
+# =============================================================================
+            #%%
         movie_frametime_data = {'subject_id':subject_id,
                                 'session':session,
                                 'movie_number':movie_idx,
