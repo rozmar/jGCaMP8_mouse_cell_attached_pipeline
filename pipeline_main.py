@@ -12,11 +12,10 @@ import utils_ephys
 import utils
 
 import notebook_google.notebook_main as online_notebook
-
 import pandas as pd
 import re
 import scipy
-from ingest import datapipeline_metadata
+from ingest import datapipeline_metadata,datapipeline_elphys,datapipeline_imaging
 #%% set parameters
 
 s2p_params = {'cell_soma_size':20, # microns - obsolete
@@ -52,9 +51,20 @@ integration_time = .4 # seconds after the last AP - for bucketing
 #%% registration and ROI detection
 utils_pipeline.batch_run_suite2p(s2p_params)
 #%%
+#%% update metadata from google spreadsheet
+online_notebook.update_metadata(metadata_params['notebook_name'],metadata_params['metadata_dir'])
+online_notebook.update_metadata(anatomy_metadata_params['notebook_name'],anatomy_metadata_params['metadata_dir'])
+#%%
+#%% ingesting stuff
+datapipeline_metadata.populatemetadata() #LAB schema
+datapipeline_elphys.populateelphys_wavesurfer() #ephys_cell_attached
+
+#%%
+datapipeline_elphys.populatemytables()
+datapipeline_imaging.upload_movie_metadata_scanimage()
 # feeding movies in datajoint
 # feeding ROIs in datajoint
-# feeding ephys in datajoint
+
 # feeding visual stim to datajoint (trials..?)
 # ROI-ephys correspondance
 # analysis
@@ -65,9 +75,7 @@ utils_pipeline.batch_run_suite2p(s2p_params)
 #%%
 
 
-#%% update metadata from google spreadsheet
-online_notebook.update_metadata(metadata_params['notebook_name'],metadata_params['metadata_dir'])
-online_notebook.update_metadata(anatomy_metadata_params['notebook_name'],anatomy_metadata_params['metadata_dir'])
+
 #%% QC for imaging and ephys
 event_ap_num = list()
 event_ap_times = list()
