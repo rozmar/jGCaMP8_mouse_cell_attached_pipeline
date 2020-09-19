@@ -8,11 +8,14 @@ from suite2p import run_s2p
 from suite2p import classification
 import shutil
 import time
+import datetime
 #%%
 def extract_scanimage_metadata(file):
     #%%
     image = ScanImageTiffReader(file)
     metadata_raw = image.metadata()
+    description_first_image = image.description(0)
+    description_first_image_dict = dict(item.split(' = ') for item in description_first_image.rstrip(r'\n ').rstrip('\n').split('\n'))
     metadata_str = metadata_raw.split('\n\n')[0]
     metadata_json = metadata_raw.split('\n\n')[1]
     metadata_dict = dict(item.split('=') for item in metadata_str.split('\n') if 'SI.' in item)
@@ -113,11 +116,16 @@ def extract_scanimage_metadata(file):
             #data.dx(i) = int32(imin(i,2));
             #data.dy(i) = int32(imin(i,1));
             #data.lines{i} = irow(1,i):(irow(2,i)-1)
+    movie_start_time = datetime.datetime.strptime(description_first_image_dict['epoch'].rstrip(']').lstrip('['), '%Y %m %d %H %M %S.%f')
     out = {'metadata':metadata,
            'roidata':data,
            'roi_metadata':roi_metadata,
            'frame_rate':frame_rate,
-           'num_planes':num_planes}
+           'num_planes':num_planes,
+           'shape':image.shape(),
+           'description_first_frame':description_first_image_dict,
+           'movie_start_time': movie_start_time}
+    #%%
     return out
 #%%
 def extract_files_from_dir(basedir):
