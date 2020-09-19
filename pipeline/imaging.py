@@ -28,6 +28,8 @@ class MovieChannel(dj.Imported):
     channel_number              : smallint
     ---
     channel_color               : varchar (20) #green/red
+    channel_offset = NULL       : int #
+    channel_subtract_offset     : tinyint # 1 or 0
     """ 
 @schema
 class MovieMetaData(dj.Imported):
@@ -35,15 +37,15 @@ class MovieMetaData(dj.Imported):
     -> Movie
     ---
     movie_hbeam_power                     : decimal(5,2)         # power percent
-    movie_hmotors_sample_x                : decimal(6,2)          # sample location in microns
-    movie_hmotors_sample_y                : decimal(6,2)          # sample location in microns
-    movie_hmotors_sample_z                : decimal(6,2)          # sample location in microns
+    movie_hmotors_sample_x = NULL         : decimal(8,2)          # sample location in microns
+    movie_hmotors_sample_y = NULL         : decimal(8,2)          # sample location in microns
+    movie_hmotors_sample_z = NULL         : decimal(8,2)          # sample location in microns
     movie_hroimanager_lineperiod          : double                # 
     movie_hroimanager_scanframeperiod     : double                # 
     movie_hroimanager_scanzoomfactor      : double                # 
     movie_hscan2d_fillfractionspatial     : double                #
     movie_hscan2d_fillfractiontemporal    : double                #
-    movie_hscan2d_mask                    : blob                  #
+    movie_hscan2d_mask = NULL             : blob                  # not saved in earlier scanimage version
     movie_hscan2d_scanmode                : varchar(50)           # resonant/...
     """ 
 
