@@ -267,13 +267,13 @@ class SweepFrameTimes(dj.Computed):
     frame_time : longblob  # time of exposure relative to recording start in seconds
     """    
     def make(self, key):
-        #%%
-       # key = {'subject_id': 471997, 'session': 1, 'cell_number': 1,'sweep_number':0}#{'subject_id':456462,'session':1,'cell_number':3,'sweep_number':24}
+        #%
+        #key = {'subject_id': 471997, 'session': 1, 'cell_number': 2,'sweep_number':1}# {'subject_id': 471997, 'session': 1, 'cell_number': 1,'sweep_number':0}#{'subject_id':456462,'session':1,'cell_number':3,'sweep_number':24}
         exposure = (ephys_cell_attached.SweepImagingExposure()&key).fetch('imaging_exposure_trace')
         if len(exposure)>0:
             si = 1/(ephys_cell_attached.SweepMetadata()&key).fetch('sample_rate')[0]
             sweeptime = float((ephys_cell_attached.Sweep()&key).fetch('sweep_start_time')[0])
-            exposure = np.diff(exposure[0])
+            exposure = np.concatenate([[0],np.diff(exposure[0])])
             peaks = signal.find_peaks(exposure,height = 1)
             peaks_idx = peaks[0]
             #%
@@ -286,7 +286,7 @@ class SweepFrameTimes(dj.Computed):
             key['frame_idx']= peaks_idx 
             key['frame_sweep_time']= peaks_idx*si
             key['frame_time']= peaks_idx*si + sweeptime
-            #%%
+            #%
             self.insert1(key,skip_duplicates=True)
     
     
