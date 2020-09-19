@@ -40,26 +40,39 @@ def fetch_sheet_titles(spreadsheetname):
 def fetch_sheet(spreadsheet_name,sheet_title):
     #%
     wb = client.open(spreadsheet_name)
-    sheetnames = list()
-    worksheets = wb.worksheets()
-    for sheet in worksheets:
-        sheetnames.append(sheet.title)
-        #%
-    if sheet_title in sheetnames:
-        idx_now = sheetnames.index(sheet_title)
-        if idx_now > -1:
-            params = {'majorDimension':'ROWS'}
-            temp = wb.values_get(sheet_title+'!A1:QQ500',params)
-            temp = temp['values']
-            header = temp.pop(0)
-            data = list()
-            for row in temp:
-                data.append(row)
+# =============================================================================
+#     sheetmetadata = wb.fetch_sheet_metadata()
+#     sheetnames = list()
+#     #worksheets = wb.worksheets()
+#     for sheet in sheetmetadata['sheets']:
+#         sheetnames.append(sheet['properties']['title'])
+#         #%
+#     if sheet_title in sheetnames:
+# =============================================================================
+    try:
+# =============================================================================
+#         idx_now = sheetnames.index(sheet_title)
+#         if idx_now > -1:
+# =============================================================================
+        params = {'majorDimension':'ROWS'}
+        temp = wb.values_get(sheet_title+'!A1:QQ500',params)
+        temp = temp['values']
+        header = temp.pop(0)
+        data = list()
+        for row in temp:
+            data.append(row)
+        try:
             df = pd.DataFrame(data, columns = header)
-            return df
-        else:
-            return None
-    else:
+        except:
+            print([spreadsheet_name,sheet_title])
+            print(header)
+            print(data)
+        return df
+# =============================================================================
+#         else:
+#             return None
+# =============================================================================
+    except:
         return None
     
 def fetch_lab_metadata(ID):
@@ -112,7 +125,8 @@ def update_metadata(notebook_name,metadata_dir):
                 try:    
                     df_wr = fetch_sheet(notebook_name,session)
                     break
-                except:
+                except gspread.exceptions.APIError as err:
+                    print(err)
                     print('quota exceeded at table {}, waiting 150s'.format(session))
                     time.sleep(150)
             if type(df_wr) == pd.DataFrame:
