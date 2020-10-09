@@ -20,6 +20,12 @@ import ray
 def populatemytables_core_paralel(arguments,runround):
     if runround == 1:
         ephysanal_cell_attached.SweepFrameTimes().populate(**arguments)
+        ephysanal_cell_attached.SquarePulse().populate(**arguments)
+    elif runround == 2:
+        ephysanal_cell_attached.ActionPotential().populate(**arguments)
+    elif runround ==3:
+        ephysanal_cell_attached.CellSpikeParameters().populate(**arguments)
+        
 # =============================================================================
 #     elif runround == 2:
 #         ephysanal.SquarePulseSeriesResistance().populate(**arguments)
@@ -35,6 +41,11 @@ def populatemytables_core_paralel(arguments,runround):
 def populatemytables_core(arguments,runround):
     if runround == 1:
         ephysanal_cell_attached.SweepFrameTimes().populate(**arguments)
+        ephysanal_cell_attached.SquarePulse().populate(**arguments)
+    elif runround == 2:
+        ephysanal_cell_attached.ActionPotential().populate(**arguments)
+    elif runround ==3:
+        ephysanal_cell_attached.CellSpikeParameters().populate(**arguments)
 # =============================================================================
 #     elif runround == 2:
 #         ephysanal.SquarePulseSeriesResistance().populate(**arguments)
@@ -49,6 +60,7 @@ def populatemytables_core(arguments,runround):
         
 def populatemytables(paralel=True,cores = 9):
     if paralel:
+        ephysanal_cell_attached.schema.jobs.delete()
         ray.init(num_cpus = cores)
         for runround in [1,2,3,4]:
             arguments = {'display_progress' : False, 'reserve_jobs' : True,'order' : 'random'}
