@@ -95,8 +95,10 @@ def upload_movie_metadata_scanimage_core(movie_dir_now,key,repository,repodir): 
     uniquebasenames = np.sort(uniquebasenames)
     
     print(movie_dir_now)
-    
+    #%
     for basename in uniquebasenames:
+        if 'zstack' in basename.lower():
+            continue
         Movie_list=list()
         MovieFrameTimes_list = list()
         MovieMetaData_list = list()
@@ -109,18 +111,22 @@ def upload_movie_metadata_scanimage_core(movie_dir_now,key,repository,repodir): 
         print(basename)
 
 
-        files_now = files_dict['filenames'][files_dict['basenames'] == basename]
+        files_now = files_dict['filenames'][(files_dict['basenames'] == basename) &(files_dict['exts']=='.tif')]
         
-        indices_now = files_dict['fileindices'][files_dict['basenames'] == basename]
+        indices_now = files_dict['fileindices'][(files_dict['basenames'] == basename) &(files_dict['exts']=='.tif')]
         order = np.argsort(indices_now)
         files_now = files_now[order]
         frame_count = list()
         metadata_list = list()
-        for file_now in files_now: 
-            tifffile = os.path.join(movie_dir_now,file_now)
-            scanimage_metadata = extract_scanimage_metadata(tifffile)            
-            metadata_list.append(scanimage_metadata)
-            frame_count.append(scanimage_metadata['shape'][0])
+        try:
+            for file_now in files_now: 
+                tifffile = os.path.join(movie_dir_now,file_now)
+                scanimage_metadata = extract_scanimage_metadata(tifffile)            
+                metadata_list.append(scanimage_metadata)
+                frame_count.append(scanimage_metadata['shape'][0])
+        except:
+            print('could not open tiff file {} . Corrupted file?'.format(file_now))
+            continue
         #break
         #%
         movie_time = metadata_list[0]['movie_start_time']
@@ -129,8 +135,13 @@ def upload_movie_metadata_scanimage_core(movie_dir_now,key,repository,repodir): 
         potential_cell_number = (ephys_cell_attached.Cell()&key).fetch('cell_number')[(celldatetimes<movie_time).argmin()-1]     
         key_cell = key.copy()
         key_cell['cell_number'] = potential_cell_number
-        cell_datetime = (datetime.datetime.combine((experiment.Session()&key_cell).fetch('session_date')[0], datetime.time.min ) + (ephys_cell_attached.Cell()&key_cell).fetch('cell_recording_start'))[0]
-        
+        #%
+        cell_time = (ephys_cell_attached.Cell()&key_cell).fetch1('cell_recording_start')
+        cell_date =  datetime.datetime.combine((experiment.Session()&key_cell).fetch1('session_date'), datetime.time.min )
+        if cell_time.total_seconds()/3600 < 4:
+            cell_date = cell_date + datetime.timedelta(days=1)
+        cell_datetime = cell_date+ cell_time
+
         sweep_nums,sweep_start_times = (ephys_cell_attached.Sweep()& key_cell).fetch('sweep_number','sweep_start_time')
         movie_start_timediff = list()
         for sweep_start_time in sweep_start_times :
@@ -139,28 +150,39 @@ def upload_movie_metadata_scanimage_core(movie_dir_now,key,repository,repodir): 
         sweep_num = sweep_nums[np.argmin(np.abs(movie_start_timediff))]
         if np.min(np.abs(movie_start_timediff))>10: # 10 seconds is the max difference
             print('no sweep found for movie {}'.format(basename))
+            
             continue
         
         #% calculate frame times
         scanimage_metadata = metadata_list[0]
         movie_frame_num = int(scanimage_metadata['metadata']['hStackManager']['framesPerSlice'])
-        cell_start_time = (session_datetime-cell_datetime).total_seconds() # in seconds relative to session start
+        cell_start_time = (cell_datetime-session_datetime).total_seconds() # in seconds relative to session start
+        if cell_start_time<0:
+            print('negative time - solve it')
+            time.sleep(100000)
         frametimes = (ephysanal_cell_attached.SweepFrameTimes()&key_cell&'sweep_number={}'.format(sweep_num)).fetch1('frame_time')
         frametimes = frametimes[:movie_frame_num]+cell_start_time # from session start
         if not (movie_frame_num == sum(frame_count) or movie_frame_num == sum(frame_count)/2):
             print('movie frame count not consistent with metadata, aborting {}'.format(basename))
             continue
         if movie_frame_num > len(frametimes):
-            print('not enough frametimes..WTF?!')
-            #continue
-            time.sleep(10000)
-            #%%
+            short_ephys_whitelist = [{'subject_id': 478404, 'session': 1, 'cell_number': 8, 'sweep_number': 5}]
+            key_sweep = key_cell.copy()
+            key_sweep['sweep_number'] = sweep_num
+            if key_sweep in short_ephys_whitelist:
+                print('not enough frametimes but whitelisted')
+                continue
+            else:
+                print('not enough frametimes..WTF?!')
+                #continue
+                time.sleep(10000)
 # =============================================================================
-#             frames_trace = (ephys_cell_attached.SweepImagingExposure()&key_cell&'sweep_number={}'.format(sweep_num)).fetch1('imaging_exposure_trace')
+#             #%%
+#             frames_trace = (ephys_cell_attached.SweepImagingExposure()&key_sweep).fetch1('imaging_exposure_trace')
 #             frameidxes = (ephysanal_cell_attached.SweepFrameTimes()&key_cell&'sweep_number={}'.format(sweep_num)).fetch1('frame_idx')
 #             plt.plot(frames_trace);plt.plot(frameidxes,frames_trace[frameidxes],'ro')
+#             #%%
 # =============================================================================
-            #%%
         movie_frametime_data = {'subject_id':subject_id,
                                 'session':session,
                                 'movie_number':movie_idx,
@@ -249,7 +271,7 @@ def upload_movie_metadata_scanimage_core(movie_dir_now,key,repository,repodir): 
             
             
             #%
-        with dj.conn().transaction: #inserting one cell
+        with dj.conn().transaction: #inserting one movie
             print('uploading to datajoint: {}'.format(movie_dir_now))
             imaging.Movie().insert(Movie_list, allow_direct_insert=True)
             dj.conn().ping()
