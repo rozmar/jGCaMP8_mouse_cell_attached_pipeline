@@ -4,258 +4,273 @@ import datajoint as dj
 import pandas as pd
 import scipy.signal as signal
 import scipy.ndimage as ndimage
+from scipy import interpolate
 from pipeline import pipeline_tools, lab, experiment, ephys_cell_attached#, ephysanal
+from utils import utils_ephys
+import time
 #dj.conn()
 #%%
 schema = dj.schema(pipeline_tools.get_schema_name('ephys-anal'),locals())
 
 #%%
 
+@schema
+class ActionPotential(dj.Computed):
+    definition = """
+    -> ephys_cell_attached.Sweep
+    ap_num : smallint unsigned # action potential number in sweep
+    ---
+    ap_max_index=null            : int unsigned # index of AP max on sweep
+    ap_max_time=null             : decimal(8,4) # time of the AP max relative to recording start
+    ap_snr_v=null                : double       #
+    ap_snr_dv=null               : double       #
+    ap_halfwidth=null            : double       # hw in ms
+    ap_full_width=null           : double       # in ms           
+    ap_rise_time=null            : double       # in ms
+    ap_integral=null             : double       # A*s or V*s depending on recording mode
+    ap_amplitude=null            : double       # in A or V depending on recording mode
+    ap_ahp_amplitude=null        : double       # in A or V depending on recording mode
+    ap_isi=null                  : double       # s between AP before and this AP - null if first AP in sweep
+    ap_peak_to_trough_time=null  : double       # ms
+    ap_baseline_current=null     : double       # A
+    ap_baseline_voltage=null     : double       # V
+    """
+    def make(self, key):
+        #%%
+        #key = {'subject_id': 472002, 'session': 1, 'cell_number': 1, 'sweep_number': 1}
+        #print('starting - {}'.format(np.random.randint(1000)))
+        sample_rate,recording_mode = (ephys_cell_attached.SweepMetadata()&key).fetch1('sample_rate','recording_mode')
+        trace = (ephys_cell_attached.SweepResponse()&key).fetch1('response_trace')
+        trace_original = trace.copy()
+        squarepulse_indices = (SquarePulse()&key&'square_pulse_num>0').fetch('square_pulse_start_idx')#ephysanal_cell_attached.
+        if len(squarepulse_indices)>0:
+            #print(key)
+            trace = utils_ephys.remove_stim_artefacts_with_stim(trace,sample_rate,squarepulse_indices)
+        try:
+            stimulus = (ephys_cell_attached.SweepStimulus()&key).fetch1('stimulus_trace')
+        except:
+            stimulus = None
+            #%%
+        try:       
+            ap_dict = utils_ephys.findAPs(trace, sample_rate,recording_mode, SN_min = 5,method = 'diff') 
+        except:
+            print('error in AP detection')
+            print(key)
+            return None
+        apnum = len(ap_dict['peak_idx'])
+        if apnum>0:
+            dj_dict = {'subject_id':[key['subject_id']]*apnum,
+                       'session': [key['session']]*apnum,
+                       'cell_number': [key['cell_number']]*apnum, 
+                       'sweep_number': [key['sweep_number']]*apnum,
+                       'ap_num': np.arange(apnum)+1,
+                       'ap_max_index':ap_dict['peak_idx'],
+                       'ap_max_time':ap_dict['peak_times'],
+                       'ap_snr_v':ap_dict['peak_snr_v'],
+                       'ap_snr_dv':ap_dict['peak_snr_dv'],
+                       'ap_halfwidth':ap_dict['half_width'],
+                       'ap_full_width':ap_dict['full_width'],
+                       'ap_rise_time':ap_dict['rise_time'],
+                       'ap_integral':ap_dict['ap_integral'],
+                       'ap_amplitude':ap_dict['peak_amplitude_left'],
+                       'ap_ahp_amplitude':ap_dict['ahp_amplitude'],
+                       'ap_isi':ap_dict['isi_left'],
+                       'ap_peak_to_trough_time':ap_dict['peak_to_through']}
+            dj_list = list()
+            for idx in range(apnum):
+                dictnow = dict()
+                for key in dj_dict.keys():
+                    dictnow[key] = dj_dict[key][idx]
+                baseline_idxs = ap_dict['baseline_idxs'][idx]
+                
+                if recording_mode == 'current clamp':
+                    try:
+                        dictnow['ap_baseline_current'] = np.nanmedian(stimulus[baseline_idxs])
+                    except:
+                        dictnow['ap_baseline_current'] = None
+                    dictnow['ap_baseline_voltage'] = np.nanmedian(trace_original[baseline_idxs])
+                elif recording_mode == 'voltage clamp':
+                    try:
+                        dictnow['ap_baseline_voltage'] = np.nanmedian(stimulus[baseline_idxs])
+                    except:
+                        dictnow['ap_baseline_voltage'] = None
+                    dictnow['ap_baseline_current'] = np.nanmedian(trace_original[baseline_idxs])
+                else:
+                    print('unknown recording mode')
+                    return None
+                
+                dj_list.append(dictnow)
 # =============================================================================
-# @schema
-# class ActionPotential(dj.Computed):
-#     definition = """
-#     -> ephys_patch.Sweep
-#     ap_num : smallint unsigned # action potential number in sweep
-#     ---
-#     ap_max_index=null : int unsigned # index of AP max on sweep
-#     ap_max_time=null : decimal(8,4) # time of the AP max relative to recording start
-#     """
-#     def make(self, key):
-#         
-#         #%%
-#         #key = {'subject_id': 454263, 'session': 1, 'cell_number': 1, 'sweep_number': 62}
-#         #print(key)
-#         keynow = key.copy()
-#         counter = 0
-#         if len(ActionPotential()&keynow) == 0:
-#             #%%
-#             pd_sweep = pd.DataFrame((ephys_patch.Sweep()&key)*(SweepResponseCorrected()&key)*(ephys_patch.SweepStimulus()&key)*(ephys_patch.SweepMetadata()&key))
-#             if len(pd_sweep)>0:
-#                 dj.conn().ping()
-#                 trace = pd_sweep['response_trace_corrected'].values[0]
-#                 sr = pd_sweep['sample_rate'][0]
-#                 si = 1/sr
-#                 msstep = int(.0005/si)
-#                 sigma = .00005
-#                 trace_f = ndimage.gaussian_filter(trace,sigma/si)
-#                 d_trace_f = np.diff(trace_f)/si
-#                 peaks = d_trace_f > 40
-#                 sp_starts,sp_ends =(SquarePulse()&key).fetch('square_pulse_start_idx','square_pulse_end_idx') 
-#                 squarepulses = np.concatenate([sp_starts,sp_ends])
-#                 for sqidx in squarepulses:
-#                     peaks[sqidx-msstep:sqidx+msstep] = False
-#                 peaks = ndimage.morphology.binary_dilation(peaks,np.ones(int(round(.002/si))))
-#                 spikemaxidxes = list()
-#                 while np.any(peaks):
-#                     if counter ==0:
-#                         print('starting ap detection')
-#                     if counter%2==0:
-#                         dj.conn().ping()
-#                     if counter%20==0:
-#                         print('pingx10')
-#                     
-#                     counter +=1
-#                     spikestart = np.argmax(peaks)
-#                     spikeend = np.argmin(peaks[spikestart:])+spikestart
-#                     if spikestart == spikeend:
-#                         if sum(peaks[spikestart:]) == len(peaks[spikestart:]):
-#                             spikeend = len(trace)
-#                     try:
-#                         sipeidx = np.argmax(trace[spikestart:spikeend])+spikestart
-#                     except:
-#                         print(key)
-#                         sipeidx = np.argmax(trace[spikestart:spikeend])+spikestart
-#                     spikemaxidxes.append(sipeidx)
-#                     peaks[spikestart:spikeend] = False
-#                     #%
-#                 if len(spikemaxidxes)>0:
-#                     spikemaxtimes = spikemaxidxes/sr + float(pd_sweep['sweep_start_time'].values[0])
-#                     spikenumbers = np.arange(len(spikemaxidxes))+1
-#                     keylist = list()
-#                     for spikenumber,spikemaxidx,spikemaxtime in zip(spikenumbers,spikemaxidxes,spikemaxtimes):
-#                         keynow =key.copy()
-#                         keynow['ap_num'] = spikenumber
-#                         keynow['ap_max_index'] = spikemaxidx
-#                         keynow['ap_max_time'] = spikemaxtime
-#                         keylist.append(keynow)
-#                         #%
-#                     try:
-#                         self.insert(keylist,skip_duplicates=True)
-#                     except:
-#                         print(key)
-#                         self.insert(keylist,skip_duplicates=True)
-# @schema
-# class ActionPotentialDetails(dj.Computed):
-#     definition = """
-#     -> ActionPotential
-#     ---
-#     ap_real                : tinyint # 1 if real AP
-#     ap_threshold           : float # mV
-#     ap_threshold_index     : int #
-#     ap_baseline_value      : float # mV average of 10 ms right before the threshold
-#     ap_halfwidth           : float # ms
-#     ap_amplitude           : float # mV
-#     ap_dv_max : float # mV/ms
-#     ap_dv_max_voltage : float # mV
-#     ap_dv_min : float # mV/ms
-#     ap_dv_min_voltage : float # mV    
-#     """
-#     def make(self, key):
-#         counter = 0
-#         #%%
-#         sigma = .00003 # seconds for filering
-#         step_time = .0001 # seconds
-#         threshold_value = 5 # mV/ms
-#         baseline_length = .01 #s back from threshold
-#         #%%
-# # =============================================================================
-# #         key = {'subject_id': 454263, 'session': 1, 'cell_number': 1, 'sweep_number': 56, 'ap_num': 30}
-# #         print(key)
-# # =============================================================================
-#         keynow = key.copy()
-#         del keynow['ap_num']
-#         pd_sweep = pd.DataFrame((ephys_patch.Sweep()&key)*(SweepResponseCorrected()&key)*(ephys_patch.SweepStimulus()&key)*(ephys_patch.SweepMetadata()&key))
-#         pd_ap = pd.DataFrame(ActionPotential()&keynow)
-#         #%%
-#         if len(pd_ap)>0 and len(ActionPotentialDetails()&dict(pd_ap.loc[0])) == 0:
-#             #%%
-#             #print(key)
-#             trace = pd_sweep['response_trace_corrected'].values[0]
-#             sr = pd_sweep['sample_rate'][0]
-#             si = 1/sr
-#             step_size = int(np.round(step_time/si))
-#             ms5_step = int(np.round(.005/si))
-#             trace_f = ndimage.gaussian_filter(trace,sigma/si)
-#             d_trace_f = np.diff(trace_f)/si
-#             tracelength = len(trace)
-#             baseline_step = int(np.round(baseline_length/si))
-#             #%%
-#             keylist = list()
-#             for ap_now in pd_ap.iterrows():
-#                 counter += 1
-#                 if counter%2==0:
-#                     dj.conn().ping()
-#                 ap_now = dict(ap_now[1])
-#                 ap_max_index = ap_now['ap_max_index']
-#                 dvmax_index = ap_max_index
-#                 while dvmax_index>step_size*2 and trace_f[dvmax_index]>0:
-#                     dvmax_index -= step_size
-#                 while dvmax_index>step_size*2 and dvmax_index < tracelength-step_size and  np.max(d_trace_f[dvmax_index-step_size:dvmax_index])>np.max(d_trace_f[dvmax_index:dvmax_index+step_size]):
-#                     dvmax_index -= step_size
-#                 if dvmax_index < tracelength -1:
-#                     dvmax_index = dvmax_index + np.argmax(d_trace_f[dvmax_index:dvmax_index+step_size])
-#                 else:
-#                     dvmax_index = tracelength-2
-#                     
-#                 
-#                 dvmin_index = ap_max_index
-#                 #%
-#                 while dvmin_index < tracelength-step_size and  (trace_f[dvmin_index]>0 or np.min(d_trace_f[np.max([dvmin_index-step_size,0]):dvmin_index])>np.min(d_trace_f[dvmin_index:dvmin_index+step_size])):
-#                     dvmin_index += step_size
-#                     #%
-#                 dvmin_index -= step_size
-#                 dvmin_index = dvmin_index + np.argmin(d_trace_f[dvmin_index:dvmin_index+step_size])
-#                 
-#                 thresh_index = dvmax_index
-#                 while thresh_index>step_size*2 and (np.min(d_trace_f[thresh_index-step_size:thresh_index])>threshold_value):
-#                     thresh_index -= step_size
-#                 thresh_index = thresh_index - np.argmax((d_trace_f[np.max([0,thresh_index-step_size]):thresh_index] < threshold_value)[::-1])
-#                 ap_threshold = trace_f[thresh_index]
-#                 ap_amplitude = trace_f[ap_max_index]-ap_threshold
-#                 hw_step_back = np.argmax(trace_f[ap_max_index:np.max([ap_max_index-ms5_step,0]):-1]<ap_threshold+ap_amplitude/2)
-#                 hw_step_forward = np.argmax(trace_f[ap_max_index:ap_max_index+ms5_step]<ap_threshold+ap_amplitude/2)
-#                 ap_halfwidth = (hw_step_back+hw_step_forward)*si
-#                 
-#                 
-#                 
-#                 if ap_amplitude > .01 and ap_halfwidth>.0001:
-#                     ap_now['ap_real'] = 1
-#                 else:
-#                     ap_now['ap_real'] = 0
-#                 ap_now['ap_threshold'] = ap_threshold*1000
-#                 ap_now['ap_threshold_index'] = thresh_index
-#                 if thresh_index>10:
-#                     ap_now['ap_baseline_value'] = np.mean(trace_f[np.max([thresh_index - baseline_step,0]) : thresh_index])*1000
-#                 else:
-#                     ap_now['ap_baseline_value'] = ap_threshold*1000
-#                 ap_now['ap_halfwidth'] =  ap_halfwidth*1000
-#                 ap_now['ap_amplitude'] =  ap_amplitude*1000
-#                 ap_now['ap_dv_max'] = d_trace_f[dvmax_index]
-#                 ap_now['ap_dv_max_voltage'] = trace_f[dvmax_index]*1000
-#                 ap_now['ap_dv_min'] =  d_trace_f[dvmin_index]
-#                 ap_now['ap_dv_min_voltage'] = trace_f[dvmin_index]*1000
-#                 del ap_now['ap_max_index']
-#                 del ap_now['ap_max_time']
-#                 keylist.append(ap_now)
-#                 #%%
-#             self.insert(keylist,skip_duplicates=True)
-# # =============================================================================
-# #             fig=plt.figure()
-# #             ax_v = fig.add_axes([0,0,.8,.8])
-# #             ax_dv = fig.add_axes([0,-1,.8,.8])
-# #             ax_v.plot(trace[ap_max_index-step_size*10:ap_max_index+step_size*10],'k-')
-# #             ax_v.plot(trace_f[ap_max_index-step_size*10:ap_max_index+step_size*10])
-# #             ax_dv.plot(d_trace_f[ap_max_index-step_size*10:ap_max_index+step_size*10])
-# #             dvidx_now = dvmax_index - ap_max_index + step_size*10
-# #             ax_dv.plot(dvidx_now,d_trace_f[dvmax_index],'ro')
-# #             ax_v.plot(dvidx_now,trace_f[dvmax_index],'ro')
-# #             dvminidx_now = dvmin_index - ap_max_index + step_size*10
-# #             ax_dv.plot(dvminidx_now,d_trace_f[dvmin_index],'ro')
-# #             ax_v.plot(dvminidx_now,trace_f[dvmin_index],'ro')
-# #             threshidx_now = thresh_index - ap_max_index + step_size*10
-# #             ax_dv.plot(threshidx_now,d_trace_f[thresh_index],'ro')
-# #             ax_v.plot(threshidx_now,trace_f[thresh_index],'ro')
-# #             plt.show()
-# #             break
-# # =============================================================================
-#         #%%
+#             t = np.arange(len(trace))/sample_rate
+#             plt.plot(t,trace)
+#             plt.plot(t[ap_dict['peak_idx']],trace[ap_dict['peak_idx']],'ro')
 # =============================================================================
-    
-# =============================================================================
-# 
-# @schema       
-# class SweepResponseCorrected(dj.Computed):
-#     definition = """
-#     -> ephys_patch.Sweep
-#     ---
-#     response_trace_corrected  : longblob #
-#     """
-#     def make(self, key):
-#        
-#         try:
-#              #%
-#            # key={'subject_id': 463291, 'session': 1, 'cell_number': 0, 'sweep_number': 64}#{'subject_id': 466769, 'session': 1, 'cell_number': 2, 'sweep_number': 45}
-#             junction_potential = 13.5/1000 #mV
-#             e_sr= (ephys_patch.SweepMetadata()&key).fetch1('sample_rate')
-#             uncompensatedRS =  float((SweepSeriesResistance()&key).fetch1('series_resistance_residual'))
-#             v = (ephys_patch.SweepResponse()&key).fetch1('response_trace')
-#             i = (ephys_patch.SweepStimulus()&key).fetch1('stimulus_trace')
-#             tau_1_on =.1/1000
-#             t = np.arange(0,.001,1/e_sr)
-#             f_on = np.exp(t/tau_1_on) 
-#             f_on = f_on/np.max(f_on)
-#             kernel = np.concatenate([f_on,np.zeros(len(t))])[::-1]
-#             kernel  = kernel /sum(kernel )  
-#             i_conv = np.convolve(i,kernel,'same')
-#             v_comp = (v - i_conv*uncompensatedRS*10**6) - junction_potential
-#             key['response_trace_corrected'] = v_comp
-#             #%
-#             self.insert1(key,skip_duplicates=True)
-#         except:
-#             print(key)
-# # =============================================================================
-# #         downsample_factor = int(np.round(e_sr/downsampled_rate))
-# #         #%downsampling
-# #         v_out = moving_average(v_comp, n=downsample_factor)
-# #         v_out = v_out[int(downsample_factor/2)::downsample_factor]
-# #         i_out = moving_average(i, n=downsample_factor)
-# #         i_out = i_out[int(downsample_factor/2)::downsample_factor]
-# #         t_out = moving_average(trace_t, n=downsample_factor)
-# #         t_out = t_out[int(downsample_factor/2)::downsample_factor]
-# # =============================================================================
-# =============================================================================
-    
+          #%%
+            self.insert(dj_list,skip_duplicates=True)
+        else:
+            print('no AP found')
+            print(key)
+            key['ap_num']=0
+            self.insert1(key,skip_duplicates=True)
+            
+            
+            
+        #%%
+@schema
+class CellSpikeParameters(dj.Computed):
+    definition = """
+    -> ephys_cell_attached.Cell
+    -> ephys_cell_attached.RecordingMode
+    ---
+    ap_halfwidth_mean                  : double
+    ap_halfwidth_median                : double
+    ap_halfwidth_std                   : double
+    ap_full_width_mean              : double
+    ap_full_width_median            : double
+    ap_full_width_std               : double
+    ap_rise_time_mean               : double
+    ap_rise_time_median             : double
+    ap_rise_time_std                : double
+    ap_peak_to_trough_time_mean        : double
+    ap_peak_to_trough_time_median      : double
+    ap_peak_to_trough_time_std         : double
+    ap_isi_mean                        : double
+    ap_isi_median                      : double
+    ap_isi_std                         : double
+    ap_snr_mean                        : double
+    ap_snr_median                      : double
+    ap_snr_std                         : double    
+    ap_amplitude_mean                  : double
+    ap_amplitude_median                : double
+    ap_amplitude_std                   : double
+    ap_integral_mean                   : double
+    ap_integral_median                 : double
+    ap_integral_std                    : double
+    ap_ahp_amplitude_mean              : double
+    ap_ahp_amplitude_median            : double
+    ap_ahp_amplitude_std               : double    
+    ap_quantity                        : smallint # ap num used for this analysis
+    average_ap_wave                    : longblob
+    average_ap_wave_time               : longblob
+    ap_isi_percentiles                 : longblob
+    total_ap_num                       : longblob
+    """
+    def make(self, key):
+        if key['recording_mode'] == 'current clamp': #for string purposes
+            recmode = 'cc'
+            max_amplitude = .005
+        else:
+            recmode = 'vc'
+            max_amplitude = 1
+        time_back = .001
+        time_forward = .002
+        APnum_to_use = 50
+        minimum_ap_num = 5
+        absolute_min_snr = 10
+        
+        
+        snrs =(ActionPotential()&key).fetch('ap_snr_dv')#ephysanal_cell_attached.
+        if len(snrs)<minimum_ap_num:
+            print('not enough aps')
+            return None
+        snrs_sorted = np.sort(snrs)[::-1]
+        min_snr = np.max([snrs_sorted[np.min([len(snrs_sorted)-1,APnum_to_use])],absolute_min_snr])
+        isi_all = (ephys_cell_attached.SweepMetadata()*ActionPotential()&key&'ap_snr_dv > {}'.format(absolute_min_snr)).fetch('ap_isi')
+        isi_all = isi_all[~np.isnan(isi_all)]
+        if len(isi_all)>minimum_ap_num:
+            key['ap_isi_percentiles'] = np.percentile(isi_all,list(range(1,101,1)))
+        else:
+            key['ap_isi_percentiles'] = None
+        key['total_ap_num'] = len(isi_all)
+        aps_needed = (ephys_cell_attached.SweepMetadata()*ActionPotential()&key&'ap_snr_dv > {}'.format(min_snr)&'ap_amplitude < {}'.format(max_amplitude))#ephysanal_cell_attached.
+        if len(aps_needed)<minimum_ap_num:
+            amplitudes_sorted = np.sort((ephys_cell_attached.SweepMetadata()*ActionPotential()&key&'ap_snr_dv > {}'.format(min_snr)).fetch('ap_amplitude'))
+            try:
+                max_amplitude = amplitudes_sorted[minimum_ap_num-1]*1.01
+                aps_needed = (ephys_cell_attached.SweepMetadata()*ActionPotential()&key&'ap_snr_dv > {}'.format(min_snr)&'ap_amplitude < {}'.format(max_amplitude))#ephysanal_cell_attached.
+            except:
+                print('only {} ap left'.format(len(amplitudes_sorted)))
+                pass
+            if len(aps_needed)<minimum_ap_num:
+                print('not enough aps')
+                return None
+            else:
+                print('max amplitude changed to {}'.format(max_amplitude))
+        ap_properties_needed = ['ap_halfwidth',
+                                'ap_full_width',
+                                'ap_rise_time',
+                                'ap_integral',
+                                'ap_amplitude',
+                                'ap_ahp_amplitude',
+                                'ap_isi',
+                                'ap_peak_to_trough_time',
+                                'ap_snr_dv']
+        ap_properties_list=aps_needed.fetch(*ap_properties_needed)
+        ap_data_now = dict()
+        for data,data_name in zip(ap_properties_list,ap_properties_needed):
+            ap_data_now[data_name] = data  
+        key['ap_quantity'] = len(aps_needed)
+        key['ap_halfwidth_mean'] = np.nanmean(ap_data_now['ap_halfwidth'])
+        key['ap_halfwidth_median'] = np.nanmedian(ap_data_now['ap_halfwidth'])
+        key['ap_halfwidth_std'] = np.nanstd(ap_data_now['ap_halfwidth'])
+        key['ap_full_width_mean'] = np.nanmean(ap_data_now['ap_full_width'])
+        key['ap_full_width_median'] = np.nanmedian(ap_data_now['ap_full_width'])
+        key['ap_full_width_std'] = np.nanstd(ap_data_now['ap_full_width'])
+        key['ap_rise_time_mean'] = np.nanmean(ap_data_now['ap_rise_time'])
+        key['ap_rise_time_median'] = np.nanmedian(ap_data_now['ap_rise_time'])
+        key['ap_rise_time_std'] = np.nanstd(ap_data_now['ap_rise_time'])
+        key['ap_peak_to_trough_time_mean'] = np.nanmean(ap_data_now['ap_peak_to_trough_time'])
+        key['ap_peak_to_trough_time_median'] = np.nanmedian(ap_data_now['ap_peak_to_trough_time'])
+        key['ap_peak_to_trough_time_std'] = np.nanstd(ap_data_now['ap_peak_to_trough_time'])
+        key['ap_isi_mean'] = np.nanmean(ap_data_now['ap_isi'])
+        key['ap_isi_median'] = np.nanmedian(ap_data_now['ap_isi'])
+        key['ap_isi_std'] = np.nanstd(ap_data_now['ap_isi'])
+        key['ap_snr_mean'] = np.nanmean(ap_data_now['ap_snr_dv'])
+        key['ap_snr_median'] = np.nanmedian(ap_data_now['ap_snr_dv'])
+        key['ap_snr_std'] = np.nanstd(ap_data_now['ap_snr_dv'])
+        key['ap_amplitude_mean'] = np.nanmean(ap_data_now['ap_amplitude'])
+        key['ap_amplitude_median'] = np.nanmedian(ap_data_now['ap_amplitude'])
+        key['ap_amplitude_std'] = np.nanstd(ap_data_now['ap_amplitude'])
+        ap_integrals_normalized = ap_data_now['ap_integral']/ap_data_now['ap_amplitude']
+        key['ap_integral_mean'] = np.nanmean(ap_integrals_normalized)
+        key['ap_integral_median'] = np.nanmedian(ap_integrals_normalized)
+        key['ap_integral_std'] = np.nanstd(ap_integrals_normalized)
+        
+        ap_ahp_amplitudes_normalized = ap_data_now['ap_ahp_amplitude']/ap_data_now['ap_amplitude']
+        key['ap_ahp_amplitude_mean'] = np.nanmean(ap_ahp_amplitudes_normalized)
+        key['ap_ahp_amplitude_median'] = np.nanmedian(ap_ahp_amplitudes_normalized)
+        key['ap_ahp_amplitude_std'] = np.nanstd(ap_ahp_amplitudes_normalized)
+        
+        #% mean AP wave
+        sweepneeded = ephys_cell_attached.Sweep()&aps_needed
+        sample_rates,trace_sweep_numbers,traces  = (ephys_cell_attached.SweepMetadata()*ephys_cell_attached.SweepResponse()&sweepneeded).fetch('sample_rate','sweep_number','response_trace')
+        if recmode == 'cc':
+            sweep_numbers,ap_max_indexs,ap_amplitudes,ap_baseline_values = aps_needed.fetch('sweep_number','ap_max_index','ap_amplitude','ap_baseline_voltage')
+        elif recmode == 'vc':
+            sweep_numbers,ap_max_indexs,ap_amplitudes,ap_baseline_values = aps_needed.fetch('sweep_number','ap_max_index','ap_amplitude','ap_baseline_current')
+            
+        ap_waves = list()
+        ap_wave_times = list()
+        for sweep_number,ap_max_index,ap_amplitude,ap_baseline_value in zip(sweep_numbers,ap_max_indexs,ap_amplitudes,ap_baseline_values):
+            trace_index = np.where(trace_sweep_numbers==sweep_number)[0][0]
+            sample_rate = sample_rates[trace_index]
+            step_back = int(time_back*sample_rate)
+            step_forward = int(time_forward*sample_rate)
+            start_idx = ap_max_index-step_back
+            end_idx=ap_max_index+step_forward
+            if start_idx >=0 and end_idx<len(traces[trace_index]):
+                ap_waves.append((traces[trace_index][start_idx:end_idx]-ap_baseline_value)/ap_amplitude)
+                ap_wave_times.append(np.arange(-step_back,step_forward,1)/sample_rate*1000)
+                #break
+        ap_waves = np.asarray(ap_waves)
+        ap_wave_times = np.asarray(ap_wave_times)
+        ap_wave_mean = np.nanmean(ap_waves,0)
+        ap_wave_mean_time = np.nanmean(ap_wave_times,0)
+        key['average_ap_wave'] = ap_wave_mean
+        key['average_ap_wave_time'] = ap_wave_mean_time
+        #key['ap_waves'] = ap_waves
+        self.insert1(key,skip_duplicates=True)   
+
 
 @schema
 class SweepFrameTimes(dj.Computed):
@@ -290,8 +305,166 @@ class SweepFrameTimes(dj.Computed):
             self.insert1(key,skip_duplicates=True)
     
     
-    
-    
+@schema
+class SquarePulse(dj.Computed):
+    definition = """
+    -> ephys_cell_attached.Sweep
+    square_pulse_num : smallint unsigned # action potential number in sweep
+    ---
+    square_pulse_start_idx=null             : int unsigned # index of sq pulse start
+    square_pulse_end_idx=null               : int unsigned # index of sq pulse end
+    square_pulse_start_time=null            : decimal(8,4) # time of the sq pulse start relative to recording start
+    square_pulse_length=null                : decimal(8,4) # length of the square pulse in seconds
+    square_pulse_baseline_current=null      : float
+    square_pulse_amplitude_current=null     : float #amplitude of square pulse
+    square_pulse_baseline_voltage=null      : float
+    square_pulse_amplitude_voltage=null     : float #amplitude of square pulse
+    """
+    def make(self, key):
+        #%%
+        #key ={'subject_id': 479571, 'session': 1, 'cell_number': 4, 'sweep_number': 4}
+        sample_rate,recording_mode = (ephys_cell_attached.SweepMetadata()&key).fetch1('sample_rate','recording_mode')
+        trace = (ephys_cell_attached.SweepResponse()&key).fetch1('response_trace')
+        onestep = int(sample_rate*.002)
+        maxlen = len(trace)-1
+        keylist = list()
+        #plt.plot(trace)
+        #%
+        print(key)
+        #%%
+        try:
+            #%%
+            #keylist = list()
+            try:
+                stimulus = (ephys_cell_attached.SweepStimulus()&key).fetch1('stimulus_trace')
+            except: # stimulus not found
+                stimulus = None
+                
+            if not type(stimulus) == type(None): # - there is a stimulus
+                maxstimdiff = np.max(np.abs(np.diff(stimulus)))
+                if recording_mode=='current clamp':
+                    minstimamplitude = 25e-12
+                else:
+                    minstimamplitude = 2e-3
+                if maxstimdiff>minstimamplitude:
+                    
+                    stim_filt = utils_ephys.gaussFilter(stimulus,sample_rate,sigma = .0001)
+                    trace_filt = utils_ephys.gaussFilter(trace,sample_rate,sigma = .0001)
+                    stim_filt_diff = np.abs(np.diff(stim_filt))
+                    stim_start_idxs = list()
+                    stim_end_idxs = list()
+                    threshold = np.median(np.abs((stim_filt_diff))/.6745)*5#minstimamplitude/10
+                    while any(stim_filt_diff>threshold)>0:
+                        stim_start_idx=np.argmax(stim_filt_diff)
+                        stim_start_idx_0 = stim_start_idx
+                        stim_start_idx_1 = stim_start_idx
+                        while stim_start_idx_0>0 and stim_filt_diff[stim_start_idx_0-1]<stim_filt_diff[stim_start_idx_0]:
+                            stim_start_idx_0 -=1
+                        while stim_start_idx_1<maxlen and stim_filt_diff[stim_start_idx_1+1]<stim_filt_diff[stim_start_idx_1]:
+                            stim_start_idx_1 +=1
+                        stim_filt_diff[stim_start_idx_0:stim_start_idx_1+1]=0
+                        if stim_filt[stim_start_idx_1]-stim_filt[stim_start_idx_0]>minstimamplitude:
+                            stim_start_idxs.append(stim_start_idx)
+                        elif stim_filt[stim_start_idx_1]-stim_filt[stim_start_idx_0]< -1*minstimamplitude:
+                            stim_end_idxs.append(stim_start_idx)                            
+                    stim_start_idxs = np.sort(stim_start_idxs)
+                    stim_end_idxs = np.sort(stim_end_idxs)
+                    all_stim_idxs = np.asarray(np.sort(np.concatenate([stim_start_idxs,stim_end_idxs])),int)
+                    for i,stim_start_idx in enumerate(all_stim_idxs):
+                        if stim_start_idx in stim_start_idxs:
+                            if any(stim_filt[stim_start_idx+onestep:]<=stim_filt[np.max([0,stim_start_idx-onestep])]):
+                                stim_end_idx = stim_start_idx+onestep+np.argmax(stim_filt[stim_start_idx+onestep:]<=stim_filt[np.max([0,stim_start_idx-onestep])])
+                                real_stim_end_idx = stim_end_idxs[np.argmin(np.abs(stim_end_idxs-stim_end_idx))]
+                            else:
+                                real_stim_end_idx = maxlen
+                        else:
+                            if any(stim_filt[stim_start_idx+onestep:]>=stim_filt[np.max([0,stim_start_idx-onestep])]):
+                                stim_end_idx = stim_start_idx+onestep+np.argmax(stim_filt[stim_start_idx+onestep:]>=stim_filt[np.max([0,stim_start_idx-onestep])])
+                                real_stim_end_idx = stim_start_idxs[np.argmin(np.abs(stim_start_idxs-stim_end_idx))]
+                            else:
+                                real_stim_end_idx = maxlen
+                        
+                        keynow = key.copy()
+                        keynow['square_pulse_num']=i+1
+                        keynow['square_pulse_start_idx']=stim_start_idx
+                        keynow['square_pulse_end_idx']=real_stim_end_idx
+                        keynow['square_pulse_start_time']=stim_start_idx/sample_rate
+                        keynow['square_pulse_length']=(real_stim_end_idx-stim_start_idx)/sample_rate
+                        baseline_idx = np.max([0,stim_start_idx-onestep])
+                        pulseon_idx = np.min([maxlen,stim_start_idx+onestep])
+                        if recording_mode=='current clamp':
+                            b_current = stim_filt[baseline_idx]
+                            d_current = stim_filt[pulseon_idx]-stim_filt[baseline_idx]
+                            b_voltage = trace_filt[baseline_idx]
+                            d_voltage = trace_filt[pulseon_idx]-trace_filt[baseline_idx]
+                        else:
+                            b_voltage = stim_filt[baseline_idx]
+                            d_voltage = stim_filt[pulseon_idx]-stim_filt[baseline_idx]
+                            b_current = trace_filt[baseline_idx]
+                            d_current = trace_filt[pulseon_idx]-trace_filt[baseline_idx]   
+                        keynow['square_pulse_amplitude_current']=d_current
+                        keynow['square_pulse_amplitude_voltage']=d_voltage
+                        keynow['square_pulse_baseline_current']=b_current
+                        keynow['square_pulse_baseline_voltage']=b_voltage
+                        keylist.append(keynow)
+            elif recording_mode=='voltage clamp' and type(stimulus) == type(None): #there is no stimulus but we try to extract square pulses
+                try:
+                    trace_corrected,stim_idxs,stim_amplitudes = utils_ephys.remove_stim_artefacts_without_stim(trace, sample_rate)
+                except:
+                    print('could not extract squarepulses')
+                    print(key)
+                    return None
+                if len(stim_idxs)>0:
+                    print('stim found without stimulus trace')
+                    print(key)
+                    trace_filt = utils_ephys.gaussFilter(trace,sample_rate,sigma = .0001)
+                    for idx, (stim_idx,stim_amplitude) in enumerate(zip(stim_idxs,stim_amplitudes)):
+                        keynow = key.copy()
+                        if stim_amplitude>0:
+                            if any(trace_filt[stim_idx+onestep:]<=trace_filt[stim_idx-onestep]):
+                                pulse_end_idx = np.argmax(trace_filt[stim_idx+onestep:]<=trace_filt[stim_idx-onestep])
+                            else:
+                                pulse_end_idx = maxlen
+                        else:
+                            if any(trace_filt[stim_idx+onestep:]>=trace_filt[stim_idx-onestep]):
+                                pulse_end_idx = np.argmax(trace_filt[stim_idx+onestep:]>=trace_filt[stim_idx-onestep])
+                            else:
+                                pulse_end_idx = maxlen
+                        keynow['square_pulse_num']=idx+1
+                        keynow['square_pulse_start_idx']=stim_idx
+                        keynow['square_pulse_end_idx']=pulse_end_idx
+                        keynow['square_pulse_start_time']=stim_idx/sample_rate
+                        keynow['square_pulse_length']=(pulse_end_idx-stim_idx)/sample_rate
+                        baseline_idx = np.max([0,stim_idx-onestep])
+                        pulseon_idx = np.min([maxlen,stim_idx+onestep])
+                        b_voltage = None
+                        d_voltage = None
+                        b_current = trace_filt[baseline_idx]
+                        d_current = trace_filt[pulseon_idx]-trace_filt[baseline_idx]   
+                        keynow['square_pulse_amplitude_current']=d_current
+                        keynow['square_pulse_amplitude_voltage']=d_voltage
+                        keynow['square_pulse_baseline_current']=b_current
+                        keynow['square_pulse_baseline_voltage']=b_voltage
+                        keylist.append(keynow)
+                        #%%
+            if len(keylist)>0:
+                self.insert(keylist,skip_duplicates=True)   
+            else:
+                key['square_pulse_num'] = 0
+                key['square_pulse_start_idx'] = None
+                key['square_pulse_end_idx'] = None
+                key['square_pulse_start_time'] = None
+                key['square_pulse_length'] = None
+                key['square_pulse_amplitude_current'] = None
+                key['square_pulse_amplitude_voltage'] = None
+                key['square_pulse_baseline_current'] = None
+                key['square_pulse_baseline_voltage'] = None     
+                #%
+                self.insert1(key,skip_duplicates=True)   
+        except:
+            print('ERROR duing insertion of squarepulse:')
+            print(key)
+    #
 # =============================================================================
 #     step = 100
 #     key = {
