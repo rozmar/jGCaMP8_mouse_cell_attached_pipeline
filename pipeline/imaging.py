@@ -88,20 +88,30 @@ class MotionCorrectionMethod(dj.Lookup):
     contents = zip(['Matlab','VolPy','Suite2P','VolPy2x'])
 
 @schema
-class RegisteredMovie(dj.Imported): #MovieFile
+class RegisteredMovie(dj.Imported):
     definition = """
     -> Movie
     -> MotionCorrectionMethod
+    """
+@schema
+class RegisteredMovieImage(dj.Imported):
+    definition = """
+    -> RegisteredMovie
+    -> MovieChannel
     ---
-    registered_movie_mean_image : longblob
+    registered_movie_mean_image               : longblob
+    registered_movie_mean_image_enhanced=null : longblob
+    registered_movie_max_projection=null      : longblob
     """
 @schema
 class MotionCorrectionMetrics(dj.Imported): 
     definition = """
     -> RegisteredMovie
     ---
-    motion_corr_parameters      : longblob              # probably a dict?  ##
-    motion_corr_metrics         : longblob              # ??
+    motion_corr_residual_rigid        : longblob #regDX[:,0]
+    motion_corr_residual_nonrigid     : lonblob  #regDX[:,1]
+    motion_corr_residual_nonrigid_max : lonblob  #regDX[:,2]
+    motion_corr_tpc                   : longblob #tPC
     """
 @schema
 class RegisteredMovieFile(dj.Imported): #MovieFile
@@ -112,8 +122,6 @@ class RegisteredMovieFile(dj.Imported): #MovieFile
     reg_movie_file_repository     : varchar(200)          # name of the repository where the data are
     reg_movie_file_directory      : varchar(200)          # location of the files  
     reg_movie_file_name           : varchar(100)          # file name
-    reg_movie_file_start_frame    : int                   # first frame of this file that belongs to the movie
-    reg_movie_file_end_frame      : int                   # last frame of this file that belongs to the movie
     """
 
 @schema
