@@ -262,7 +262,7 @@ def upload_movie_metadata_scanimage_core(movie_dir_now,key,repository,repodir): 
                                   'movie_number' : movie_idx,
                                   'movie_file_number' : movie_file_number,
                                   'movie_file_repository': repository,
-                                  'movie_file_directory' : movie_dir_now[len(repodir)+1:],
+                                  'movie_file_directory' : movie_dir_now[len(repodir):],
                                   'movie_file_name' : movie_file_name,
                                   'movie_file_start_frame' : 0,
                                   'movie_file_end_frame' : movie_frame_count}
@@ -283,3 +283,45 @@ def upload_movie_metadata_scanimage_core(movie_dir_now,key,repository,repodir): 
             dj.conn().ping()
             imaging.MovieChannel().insert(MovieChannels_list, allow_direct_insert=True)
             dj.conn().ping()
+
+#%% suite2p registration
+registered_movie_list = list()
+registered_movie_image_list = list()
+movies = imaging.Movie()
+for movie in movies:
+    movie_name = movie['movie_name']
+    moviefiles = imaging.MovieFile()&movie
+    
+    repodir = dj.config['locations.{}'.format(list(moviefiles)[0]['movie_file_repository'])]
+    movie_file_directory = list(moviefiles)[0]['movie_file_directory']
+    suite2p_movie_directory = movie_file_directory.replace('raw','suite2p')
+    try:
+        suite2p_dir = os.path.join(repodir,suite2p_movie_directory,movie_name)
+        s2p_files=os.listdir(suite2p_dir)
+    except:
+        suite2p_dir = os.path.join(repodir,'D'+suite2p_movie_directory,movie_name) #HOTFIX - stupid indexing mistake in ingest script
+        s2p_files=os.listdir(suite2p_dir)
+    reg_metadata = np.load(os.path.join(suite2p_dir,'plane0','ops.npy'),allow_pickle = True).tolist()
+    registered_movie = dict()
+    for primary_key in imaging.Movie.primary_key:
+        registered_movie[primary_key] = movie[primary_key]
+    registered_movie['motion_correction_method'] = 'Suite2P'
+    registered_movie_list.append(registered_movie)
+    movie_channels = imaging.MovieChannel()&movie
+    for movie_channel in movie_channels:
+        registered_movie_image = registered_movie.copy()
+        registered_movie_image['channel_number'] = movie_channel['channel_number']
+        if movie_channel['channel_number']==reg_metadata['functional_chan']:
+            registered_movie_image['registered_movie_mean_image'] = reg_metadata['meanImg']
+            registered_movie_image['registered_movie_mean_image_enhanced'] = reg_metadata['meanImgE']
+            registered_movie_image['registered_movie_max_projection'] = reg_metadata['max_proj']
+        else:
+            registered_movie_image['registered_movie_mean_image'] = reg_metadata['meanImg_chan2']
+            registered_movie_image['registered_movie_mean_image_enhanced'] = reg_metadata['meanImg_corrected']
+            registered_movie_image['registered_movie_max_projection'] = None
+        registered_movie_image_list.append(registered_movie_image)
+    #MotionCorrectionMetrics
+    #RegisteredMovieFile
+    #MotionCorrection
+        
+    break
