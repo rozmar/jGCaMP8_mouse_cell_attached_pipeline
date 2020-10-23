@@ -49,6 +49,22 @@ class MovieMetaData(dj.Imported):
     movie_hscan2d_scanmode                : varchar(50)           # resonant/...
     """ 
 
+@schema 
+class MovieNoteType(dj.Lookup):
+    definition = """
+    movie_note_type : varchar(20)
+    """
+    contents = zip(('ephys', 'imaging', 'analysis', 'cell', 'quality','beam expander'))
+                    
+@schema
+class MovieNote(dj.Imported):
+    definition = """
+    -> Movie
+    -> MovieNoteType
+    ---
+    movie_note  : varchar(255) 
+    """
+    
 @schema
 class MoviePowerPostObjective(dj.Imported):
     definition = """
@@ -109,15 +125,15 @@ class MotionCorrectionMetrics(dj.Imported):
     -> RegisteredMovie
     ---
     motion_corr_residual_rigid        : longblob #regDX[:,0]
-    motion_corr_residual_nonrigid     : lonblob  #regDX[:,1]
-    motion_corr_residual_nonrigid_max : lonblob  #regDX[:,2]
+    motion_corr_residual_nonrigid     : longblob  #regDX[:,1]
+    motion_corr_residual_nonrigid_max : longblob  #regDX[:,2]
     motion_corr_tpc                   : longblob #tPC
     """
 @schema
 class RegisteredMovieFile(dj.Imported): #MovieFile
     definition = """
     -> RegisteredMovie 
-    movie_file_number         : smallint
+    reg_movie_file_number         : smallint
     ---
     reg_movie_file_repository     : varchar(200)          # name of the repository where the data are
     reg_movie_file_directory      : varchar(200)          # location of the files  
@@ -130,8 +146,11 @@ class MotionCorrection(dj.Imported):
     -> RegisteredMovie
     motion_correction_id    : smallint             # id of motion correction in case of multiple motion corrections
     ---
-    motion_corr_description     : varchar(300)         #description of the motion correction
-    motion_corr_vectors         : longblob             # registration vectors   
+    motion_corr_description     : varchar(300)         #description of the motion correction - rigid/nonrigid
+    motion_corr_x_block=null    : longblob            
+    motion_corr_y_block=null    : longblob
+    motion_corr_x_offset        : longblob         # registration vectors   
+    motion_corr_y_offset        : longblob         # registration vectors   
     """
 
 
@@ -150,22 +169,46 @@ class ROI(dj.Imported):
     definition = """
     -> RegisteredMovie
     -> ROIType   
-    -> MovieChannel
     roi_number                      : int           # roi number (restarts for every registered movie, same number in different channels means the same ROI)
     ---
-    roi_f                           : longblob      # spikepursuit
     roi_centroid_x                  : double        # ROI centroid  x, pixels
     roi_centroid_y                  : double        # ROI centroid  y, pixels
-    roi_mask                        : longblob      # pixel mask 
+    roi_xpix                        : longblob      # pixel mask 
+    roi_ypix                        : longblob      # pixel mask 
     roi_time_offset                 : double        # time offset of ROI relative to frame time
+    roi_aspect_ratio                : double
+    roi_compact                     : double
+    roi_radius                      : double
+    roi_skew                        : double
     """
-    
 @schema
 class ROINeuropil(dj.Imported): 
 # ROI (Region of interest - e.g. cells)
     definition = """
     -> ROI
+    neuropil_number                      : int  # in case there are different neuropils
+    ---
+    neuropil_xpix                        : longblob      # pixel mask 
+    neuropil_ypix                        : longblob      # pixel mask 
+    """
+    
+@schema
+class ROITrace(dj.Imported): 
+# ROI (Region of interest - e.g. cells)
+    definition = """
+    -> ROI
+    -> MovieChannel
+    ---
+    roi_f                           : longblob
+    """    
+
+
+@schema
+class ROINeuropilTrace(dj.Imported): 
+# ROI (Region of interest - e.g. cells)
+    definition = """
+    -> ROINeuropil
+    -> MovieChannel
     ---
     neuropil_f                      : longblob      # spikepursuit
-    neuropil_mask                   : longblob      # pixel mask 
     """
