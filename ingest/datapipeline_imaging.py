@@ -9,10 +9,12 @@ import scipy
 import re 
 import os
 import shutil
+import pandas as pd
 dj.conn()
 from pipeline import pipeline_tools
-from pipeline import lab, experiment, imaging, ephys_cell_attached, ephysanal_cell_attached
+from pipeline import lab, experiment, imaging, ephys_cell_attached, ephysanal_cell_attached, imaging_gt
 from utils_pipeline import extract_scanimage_metadata, extract_files_from_dir
+from suite2p.detection.masks import create_neuropil_masks, create_cell_pix
 #import ray
 import time
 
@@ -284,44 +286,348 @@ def upload_movie_metadata_scanimage_core(movie_dir_now,key,repository,repodir): 
             imaging.MovieChannel().insert(MovieChannels_list, allow_direct_insert=True)
             dj.conn().ping()
 
-#%% suite2p registration
-registered_movie_list = list()
-registered_movie_image_list = list()
-movies = imaging.Movie()
-for movie in movies:
-    movie_name = movie['movie_name']
-    moviefiles = imaging.MovieFile()&movie
+#% suite2p registration
+def upload_movie_registration_scanimage():
+    subject_ids = np.unique(imaging.Movie().fetch('subject_id'))
+    for subject_id in subject_ids:
+        if len(imaging.RegisteredMovie()&'subject_id = {}'.format(subject_id)&'motion_correction_method= "Suite2P"')==0:
+            print('loading registration for {}'.format(subject_id))
+            upload_movie_registration_scanimage_core(subject_id)
     
-    repodir = dj.config['locations.{}'.format(list(moviefiles)[0]['movie_file_repository'])]
-    movie_file_directory = list(moviefiles)[0]['movie_file_directory']
-    suite2p_movie_directory = movie_file_directory.replace('raw','suite2p')
-    try:
-        suite2p_dir = os.path.join(repodir,suite2p_movie_directory,movie_name)
-        s2p_files=os.listdir(suite2p_dir)
-    except:
-        suite2p_dir = os.path.join(repodir,'D'+suite2p_movie_directory,movie_name) #HOTFIX - stupid indexing mistake in ingest script
-        s2p_files=os.listdir(suite2p_dir)
-    reg_metadata = np.load(os.path.join(suite2p_dir,'plane0','ops.npy'),allow_pickle = True).tolist()
-    registered_movie = dict()
-    for primary_key in imaging.Movie.primary_key:
-        registered_movie[primary_key] = movie[primary_key]
-    registered_movie['motion_correction_method'] = 'Suite2P'
-    registered_movie_list.append(registered_movie)
-    movie_channels = imaging.MovieChannel()&movie
-    for movie_channel in movie_channels:
-        registered_movie_image = registered_movie.copy()
-        registered_movie_image['channel_number'] = movie_channel['channel_number']
-        if movie_channel['channel_number']==reg_metadata['functional_chan']:
-            registered_movie_image['registered_movie_mean_image'] = reg_metadata['meanImg']
-            registered_movie_image['registered_movie_mean_image_enhanced'] = reg_metadata['meanImgE']
-            registered_movie_image['registered_movie_max_projection'] = reg_metadata['max_proj']
-        else:
-            registered_movie_image['registered_movie_mean_image'] = reg_metadata['meanImg_chan2']
-            registered_movie_image['registered_movie_mean_image_enhanced'] = reg_metadata['meanImg_corrected']
-            registered_movie_image['registered_movie_max_projection'] = None
-        registered_movie_image_list.append(registered_movie_image)
-    #MotionCorrectionMetrics
-    #RegisteredMovieFile
-    #MotionCorrection
+
+def upload_movie_registration_scanimage_core(subject_id):
+    #%
+    movies = imaging.Movie()&'subject_id = {}'.format(subject_id)
+    registered_movie_list = list()
+    registered_movie_image_list = list()
+    motion_correction_metrics_list = list()
+    registered_movie_file_list = list()
+    motion_correction_list = list()
+    
+    for movie in movies:
+        movie_name = movie['movie_name']
+        moviefiles = imaging.MovieFile()&movie
+        reponame = list(moviefiles)[0]['movie_file_repository']
+        repodir = dj.config['locations.{}'.format(reponame)]
+        movie_file_directory = list(moviefiles)[0]['movie_file_directory']
+        suite2p_movie_directory = movie_file_directory.replace('raw','suite2p')
+        try:
+            suite2p_dir = os.path.join(repodir,suite2p_movie_directory,movie_name)
+            s2p_files=os.listdir(suite2p_dir)
+        except:
+            suite2p_dir = os.path.join(repodir,'D'+suite2p_movie_directory,movie_name) #HOTFIX - stupid indexing mistake in ingest script
+            s2p_files=os.listdir(suite2p_dir)
+        reg_metadata = np.load(os.path.join(suite2p_dir,'plane0','ops.npy'),allow_pickle = True).tolist()
+        registered_movie = dict()
+        for primary_key in imaging.Movie.primary_key:
+            registered_movie[primary_key] = movie[primary_key]
+        registered_movie['motion_correction_method'] = 'Suite2P'
+        registered_movie_list.append(registered_movie)
+        movie_channels = imaging.MovieChannel()&movie
+        for movie_channel in movie_channels:
+            registered_movie_image = registered_movie.copy()
+            registered_movie_image['channel_number'] = movie_channel['channel_number']
+            if movie_channel['channel_number']==reg_metadata['functional_chan']:
+                registered_movie_image['registered_movie_mean_image'] = reg_metadata['meanImg']
+                try:
+                    registered_movie_image['registered_movie_mean_image_enhanced'] = reg_metadata['meanImgE']
+                except:
+                    registered_movie_image['registered_movie_mean_image_enhanced']= None
+                try:
+                    registered_movie_image['registered_movie_max_projection'] = reg_metadata['max_proj']
+                except:
+                    registered_movie_image['registered_movie_max_projection'] = None
+            else:
+                registered_movie_image['registered_movie_mean_image'] = reg_metadata['meanImg_chan2']
+                try:
+                    registered_movie_image['registered_movie_mean_image_enhanced'] = reg_metadata['meanImg_chan2_corrected']
+                except:
+                    registered_movie_image['registered_movie_mean_image_enhanced'] = None
+                registered_movie_image['registered_movie_max_projection'] = None
+            registered_movie_image_list.append(registered_movie_image)
+        motion_correction_metrics = registered_movie.copy()
+        motion_correction_metrics['motion_corr_residual_rigid']=  reg_metadata['regDX'][:,0]
+        motion_correction_metrics['motion_corr_residual_nonrigid']=reg_metadata['regDX'][:,1]
+        motion_correction_metrics['motion_corr_residual_nonrigid_max']= reg_metadata['regDX'][:,2]
+        motion_correction_metrics['motion_corr_tpc']=reg_metadata['tPC']
+        motion_correction_metrics_list.append(motion_correction_metrics)
         
-    break
+        reg_directory_full = os.path.join(suite2p_dir,'plane0','reg_tif')
+        reg_movie_files = np.sort(os.listdir(reg_directory_full))
+        
+        for reg_movie_file_number,reg_movie_file in enumerate(reg_movie_files):
+            registered_movie_file = registered_movie.copy()
+            registered_movie_file['reg_movie_file_number'] = reg_movie_file_number
+            registered_movie_file['reg_movie_file_repository'] = reponame
+            registered_movie_file['reg_movie_file_directory'] =reg_directory_full[len(repodir):]
+            registered_movie_file['reg_movie_file_name'] = reg_movie_file
+            registered_movie_file_list.append(registered_movie_file)
+        
+        motion_corr_descriptions = ['rigid registration','nonrigid registration']
+        for motion_correction_id,motion_corr_description in enumerate(motion_corr_descriptions):
+            motion_correction = registered_movie.copy()
+            motion_correction['motion_correction_id'] = motion_correction_id
+            motion_correction['motion_corr_description'] = motion_corr_description
+            if 'nonrigid' in motion_corr_description:
+                motion_correction['motion_corr_x_block']=reg_metadata['xblock']
+                motion_correction['motion_corr_y_block']=reg_metadata['yblock']
+                motion_correction['motion_corr_x_offset']=reg_metadata['xoff1']
+                motion_correction['motion_corr_y_offset'] =reg_metadata['yoff1']
+            else:
+                motion_correction['motion_corr_x_block']=None
+                motion_correction['motion_corr_y_block']=None
+                motion_correction['motion_corr_x_offset']= reg_metadata['xoff']
+                motion_correction['motion_corr_y_offset'] =reg_metadata['yoff'] 
+            motion_correction_list.append(motion_correction)
+            
+    
+    with dj.conn().transaction: #inserting one movie
+        print('uploading to datajoint: subject {}'.format(movie['subject_id']))
+        imaging.RegisteredMovie().insert(registered_movie_list, allow_direct_insert=True)
+        dj.conn().ping()
+        imaging.RegisteredMovieImage().insert(registered_movie_image_list, allow_direct_insert=True)
+        dj.conn().ping()
+        imaging.MotionCorrectionMetrics().insert(motion_correction_metrics_list, allow_direct_insert=True)
+        dj.conn().ping()
+        imaging.RegisteredMovieFile().insert(registered_movie_file_list, allow_direct_insert=True)
+        dj.conn().ping()
+        imaging.MotionCorrection().insert(motion_correction_list, allow_direct_insert=True)
+        dj.conn().ping()
+#%% upload scanimage ROIs
+def upload_ROIs_scanimage():
+    #%%
+    subject_ids = np.unique(imaging.Movie().fetch('subject_id'))
+    for subject_id in subject_ids:
+        print('loading ROIs for {}'.format(subject_id))
+        upload_ROIs_scanimage_core(subject_id)
+       #%%     
+def upload_ROIs_scanimage_core(subject_id):
+    #%%
+    movies = imaging.Movie()&'subject_id = {}'.format(subject_id)
+    roi_list = list()
+    roi_neuropil_list = list()
+    roi_trace_list = list()
+    roi_neuropil_trace_list = list()
+    for movie in movies:
+        
+        if len(imaging.ROI()&movie)>0:
+            continue
+        
+        registered_movie = imaging.RegisteredMovie()&movie&'motion_correction_method= "Suite2P"'
+        moviemetadata = list(imaging.MovieMetaData()&movie)[0]
+        channels = imaging.MovieChannel()&registered_movie
+        registered_moviefiles = imaging.RegisteredMovieFile()&registered_movie
+        reponame = list(imaging.RegisteredMovieFile()&registered_movie)[0]['reg_movie_file_repository']
+        repodir = dj.config['locations.{}'.format(reponame)]
+        movie_file_directory = list(registered_moviefiles)[0]['reg_movie_file_directory']
+        roi_dir = os.path.join(repodir,movie_file_directory[:movie_file_directory.find('reg_tif')])
+        try:
+            iscell = np.load(os.path.join(roi_dir,'iscell.npy'))
+            F =  np.load(os.path.join(roi_dir,'F.npy'))
+            F_chan2 =  np.load(os.path.join(roi_dir,'F_chan2.npy'))
+            Fneu =  np.load(os.path.join(roi_dir,'Fneu.npy'))
+            Fneu_chan2 = np.load(os.path.join(roi_dir,'Fneu_chan2.npy'))
+            roi_stat = list(np.load(os.path.join(roi_dir,'stat.npy'),allow_pickle=True))
+            reg_metadata = np.load(os.path.join(roi_dir,'ops.npy'),allow_pickle = True).tolist()
+        except:
+            print('missing or corrupt suite2p files, skipping {}'.format(movie))
+            continue
+        cell_indices = np.where(iscell[:,0])[0]
+        cell_pix = create_cell_pix(roi_stat, Ly=reg_metadata['Ly'], Lx=reg_metadata['Lx'], allow_overlap=reg_metadata['allow_overlap'])
+    
+        for cell_index in cell_indices:   
+            dj.conn().ping()
+            neuropil_mask = create_neuropil_masks(ypixs=[roi_stat[cell_index]['ypix']],
+                                                  xpixs=[roi_stat[cell_index]['xpix']],
+                                                  cell_pix=cell_pix,
+                                                  inner_neuropil_radius=reg_metadata['inner_neuropil_radius'],
+                                                  min_neuropil_pixels=reg_metadata['min_neuropil_pixels'])
+            neuropil_mask = neuropil_mask.reshape(reg_metadata['Ly'],reg_metadata['Lx'])
+            neu_ypix,neu_xpix = np.where(neuropil_mask)
+            xpix = roi_stat[cell_index]['xpix']
+            ypix = roi_stat[cell_index]['ypix']
+            roi = list(registered_movie)[0].copy()
+            roi['roi_type'] = 'Suite2P'
+            roi['roi_number'] = cell_index
+            roi_trace = roi.copy()
+            roi_neuropil = roi.copy()
+            roi_neuropil['neuropil_number'] = 0
+            roi_neuropil_trace = roi_neuropil.copy()
+            roi['roi_centroid_x'] = roi_stat[cell_index]['med'][1]
+            roi['roi_centroid_y'] = roi_stat[cell_index]['med'][0]
+            roi['roi_xpix'] = xpix
+            roi['roi_ypix'] = ypix
+            
+            roi['roi_time_offset'] = moviemetadata['movie_hroimanager_lineperiod']*roi['roi_centroid_x']
+            roi['roi_aspect_ratio'] = roi_stat[cell_index]['aspect_ratio']
+            roi['roi_compact'] = roi_stat[cell_index]['compact']
+            roi['roi_radius'] = roi_stat[cell_index]['radius']
+            roi['roi_skew'] =  roi_stat[cell_index]['skew']
+            roi_list.append(roi)
+            
+            roi_neuropil['neuropil_xpix'] = neu_xpix
+            roi_neuropil['neuropil_ypix'] = neu_ypix
+            roi_neuropil_list.append(roi_neuropil)
+            
+            for channel in channels:
+                roi_trace['channel_number'] = channel['channel_number']
+                roi_neuropil_trace['channel_number'] = channel['channel_number']
+                if channel['channel_number'] == reg_metadata['functional_chan']:
+                    roi_trace_green = roi_trace.copy()
+                    roi_neuropil_trace_green = roi_neuropil_trace.copy()
+                    roi_trace_green['roi_f'] = F[cell_index,:]
+                    roi_neuropil_trace_green['neuropil_f'] = Fneu[cell_index,:]
+                    roi_trace_list.append(roi_trace_green)
+                    roi_neuropil_trace_list.append(roi_neuropil_trace_green)
+                else:
+                    try:
+                        roi_trace_red = roi_trace.copy()
+                        roi_neuropil_trace_red = roi_neuropil_trace.copy()
+                        roi_trace_red['roi_f'] = F_chan2[cell_index,:]
+                        roi_neuropil_trace_red['neuropil_f'] = Fneu_chan2[cell_index,:]
+                        roi_trace_list.append(roi_trace_red)
+                        roi_neuropil_trace_list.append(roi_neuropil_trace_red)
+                    except:
+                        print('red ROI not found for  {} - merging error??'.format(movie))
+# =============================================================================
+#          #%%
+#         img = np.zeros([reg_metadata['Ly'],reg_metadata['Lx']])
+#         img[ypix,xpix]=1
+#         img[neu_ypix,neu_xpix]=2
+#         plt.imshow(img)
+# =============================================================================
+        #%
+    with dj.conn().transaction: #inserting one movie
+        print('uploading ROIs to datajoint -  subject-movie: {}-{}'.format(movie['subject_id'],'all movies')) #movie['movie_name']
+        imaging.ROI().insert(roi_list, allow_direct_insert=True)
+        dj.conn().ping()
+        imaging.ROINeuropil().insert(roi_neuropil_list, allow_direct_insert=True)
+        dj.conn().ping()
+        imaging.ROITrace().insert(roi_trace_list, allow_direct_insert=True)
+        dj.conn().ping()
+        imaging.ROINeuropilTrace().insert(roi_neuropil_trace_list, allow_direct_insert=True)
+
+
+
+
+#%% connect ephys and ophys
+
+def upload_ground_truth_ROIs_and_notes():
+    #%%
+    sessions = experiment.Session()
+    for session in sessions:
+        if len(experiment.SessionComment()&session)==0:
+            print('loading ROIs for {}'.format(session['subject_id']))
+            subject_id = session['subject_id']
+            session = session['session']
+            upload_ground_truth_ROIs_and_notes_core(subject_id,session)
+
+#%%
+def upload_ground_truth_ROIs_and_notes_core(subject_id,session):  
+    #%%
+    roisweepcorrespondance_list = list()
+    movienote_list = list()
+    session_date,session_time = (experiment.Session()&'subject_id = {}'.format(subject_id)&'session = {}'.format(session)).fetch1('session_date','session_time')
+    movies = imaging.Movie()&'subject_id = {}'.format(subject_id)&'session = {}'.format(session)
+    movie_start_times = np.asarray(np.sort(movies.fetch('movie_start_time')),float)
+    sweeps = ephys_cell_attached.Cell()*ephys_cell_attached.Sweep()&'subject_id = {}'.format(subject_id)&'session = {}'.format(session)
+    df_session_metadata = pd.read_csv(dj.config['locations.metadata_surgery_experiment']+'{}-anm{}.csv'.format(str(session_date).replace('-',''),subject_id))
+    session_comment = df_session_metadata['general comments'][0]
+    sessioncomment = {'subject_id':subject_id,
+                      'session':session,
+                      'session_comment':session_comment}
+    pipette_fill = df_session_metadata['pipette fill'][0]
+    if '594' in pipette_fill:
+        dye_name = 'Alexa 594'
+    else:
+        print('unknown dye: {}'.format(pipette_fill))
+    if 'um' in pipette_fill.lower():
+        dye_concentration = float(pipette_fill[:pipette_fill.lower().find('um')])
+    elif 'ul' in pipette_fill.lower():#stupid typo
+        dye_concentration = float(pipette_fill[:pipette_fill.lower().find('ul')])
+    else:
+        print('unknown dye concentration: {}'.format(dye_concentration))
+    sessionpipettefill = {'subject_id':subject_id,
+                          'session':session,
+                          'dye_name':dye_name,
+                          'dye_concentration':dye_concentration}
+    for sweep in sweeps:
+        cell_time = sweep['cell_recording_start']
+    
+        sweep_start_time = (cell_time - session_time).total_seconds() + float(sweep['sweep_start_time'])
+        movie_start_time= movie_start_times[np.argmax(movie_start_times>sweep_start_time)]
+        try:
+            movie = list(movies & 'movie_start_time = {}'.format(movie_start_time))[0]
+            timediff = np.abs(float(movie['movie_start_time'])-sweep_start_time)
+            if timediff>.1:
+                print('error in finding movie for sweep - timediff too big: {}'.format(sweep))
+                #break
+                continue
+        except:
+            print('error in finding movie for sweep: {}'.format(sweep))
+            #break
+            continue
+        movie_match = re.search('(stim_(\d+)|stm(\d+)|sim(\d+)|sitm(\d+)|stim(\d+))', movie['movie_name'])
+        if not movie_match:
+            print('no reference to stim number in movie name: {}'.format(movie))
+            continue
+        movie_stimnum = int(re.findall("\d+",movie_match.string[movie_match.span()[0]:movie_match.span()[1]])[0])
+        ephys_match = re.search('(stim_(\d+)|stm(\d+)|sim(\d+)|sitm(\d+)|stim(\d+))', sweep['protocol_name'])
+        if not ephys_match:
+            print('no reference to stim number in movie name: {}'.format(movie))
+            continue
+        ephys_stimnum = int(re.findall("\d+",ephys_match.string[ephys_match.span()[0]:ephys_match.span()[1]])[0])
+        if ephys_stimnum != movie_stimnum:
+            print('movie and ephys stimnum is not the same: {} - {}'.format(sweep,movie))
+            continue
+        row = df_session_metadata.loc[np.where(((df_session_metadata['Cell']==sweep['cell_number']) & (df_session_metadata['Run']==ephys_stimnum)).values)[0][0]]
+        #%
+        
+        movienote = dict()
+        for primary_key in imaging.Movie().primary_key:
+            movienote[primary_key] = movie[primary_key]
+        for key in row.keys():
+            if ('expander' in key or 'good' in key or'comment' in key or'note' in key) and 'general' not in key and len(str(row[key]))>0:
+                movienote_now = movienote.copy()
+                movienote_now['movie_note'] = str(row[key])
+                if 'phys' in key:
+                    movienote_now['movie_note_type'] = 'ephys'
+                elif 'anal' in key:
+                    movienote_now['movie_note_type'] = 'analysis'
+                elif 'expander' in key:
+                    movienote_now['movie_note_type'] = 'beam expander'
+                elif 'good' in key:
+                    movienote_now['movie_note_type'] = 'quality'
+                elif 'cell' in key:
+                    movienote_now['movie_note_type'] = 'cell'
+                else:
+                    movienote_now['movie_note_type'] = 'imaging'
+                movienote_list.append(movienote_now)
+        try:
+            roi_number = int(row['suite2p-ROI-num'])
+        except:
+            print('no valid ROI number: {}'.format(row['suite2p-ROI-num']))
+            continue
+        try:
+            roi = list(imaging.ROI()&movie&'roi_number = {}'.format(roi_number))[0]
+        except:
+            print('ROI {} not found in this movie: {}'.format(roi_number,movie))
+        roisweepcorrespondance = dict()
+        for primary_key in imaging.ROI().primary_key:
+            roisweepcorrespondance[primary_key] = roi[primary_key]
+        for primary_key in ephys_cell_attached.Sweep().primary_key:
+            roisweepcorrespondance[primary_key] = sweep[primary_key]
+        roisweepcorrespondance_list.append(roisweepcorrespondance)
+    
+    with dj.conn().transaction: #inserting one movie
+        print('uploading notes and groundtruth ROIs for subject {}'.format(movie['subject_id'])) #movie['movie_name']
+        imaging_gt.ROISweepCorrespondance().insert(roisweepcorrespondance_list, allow_direct_insert=True)
+        dj.conn().ping()
+        imaging.MovieNote().insert(movienote_list, allow_direct_insert=True)
+        dj.conn().ping()
+        experiment.SessionComment().insert1(sessioncomment, allow_direct_insert=True)
+        dj.conn().ping()
+        ephys_cell_attached.SessionPipetteFill().insert1(sessionpipettefill, allow_direct_insert=True)
+    
+    #%%
+#
