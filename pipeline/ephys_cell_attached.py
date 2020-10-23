@@ -13,6 +13,20 @@ schema = dj.schema(get_schema_name('ephys_cell_attached'),locals())
 # =============================================================================
 #schema = dj.schema('rozmar_tutorial', locals())
 
+@schema
+class DyeName(dj.Lookup): #dye
+    definition = """
+    dye_name  :  varchar(100)
+    """
+    contents = zip(('Alexa 594','Alexa 488'))
+
+@schema
+class SessionPipetteFill(dj.Imported):
+    definition = """
+    -> experiment.Session
+    -> DyeName
+    dye_concentration : double # in micromoles per liter
+    """
 
 @schema
 class CellType(dj.Lookup): #PUTATIVE cell type based on first impression
