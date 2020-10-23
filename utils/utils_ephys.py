@@ -176,7 +176,8 @@ def findAPs(trace, sample_rate,recording_mode, SN_min = 5,method = 'diff'):
         ap_integrals = list()
         rise_time = list()
         trace_diff_scaled_temp = trace_diff_scaled.copy()
-        while np.max(trace_diff_scaled_temp)>SN_min:
+        max_event_num = (len(trace)/sample_rate)*100#firing continuously at 100 Hz
+        while np.max(trace_diff_scaled_temp)>SN_min and len(peak_idxs)<max_event_num:
             peak_idx = np.argmax(trace_diff_scaled_temp)
             start_idx = np.max([peak_idx-1,0])
             
@@ -223,9 +224,12 @@ def findAPs(trace, sample_rate,recording_mode, SN_min = 5,method = 'diff'):
             half_width = sum(wave_normalized_upsampled>.5)/sample_rate*100
             full_width = sum(wave_normalized_upsampled>.05)/sample_rate*100            
             wave_normalized_for_rise = (trace[start_idx:peak_idxs[-1]]-baseline_left)/(peak_value_raw-baseline_left)
-            f = interpolate.interp1d(np.arange(0,len(wave_normalized_for_rise),1),wave_normalized_for_rise)
-            wave_normalized_for_rise_upsampled = f(np.arange(0,len(wave_normalized_for_rise)-1,.1))  
-            rise_time = sum(wave_normalized_for_rise_upsampled>.05)/sample_rate*100
+            try:
+                f = interpolate.interp1d(np.arange(0,len(wave_normalized_for_rise),1),wave_normalized_for_rise)
+                wave_normalized_for_rise_upsampled = f(np.arange(0,len(wave_normalized_for_rise)-1,.1))  
+                rise_time = sum(wave_normalized_for_rise_upsampled>.05)/sample_rate*100
+            except:
+                rise_time = 0
             peak_amplitudes_left.append(amplitude_left)
             peak_amplitudes_right.append(amplitude_right)
             half_widths.append(half_width)
@@ -271,8 +275,11 @@ def findAPs(trace, sample_rate,recording_mode, SN_min = 5,method = 'diff'):
         if len(peak_idxs)>0:
             #enforce similar amplitude and halfwidth APs
             isis = np.concatenate([[1],np.diff(peak_idxs)/sample_rate])
-            validamplitude = np.median(peak_amplitudes_left[peak_snrs_dv>SN_min*2])
-            validhw = np.median(half_widths[peak_snrs_dv>SN_min*2])
+            try:
+                validamplitude = np.percentile(peak_amplitudes_left[peak_snrs_dv>SN_min*2],90)
+            except:
+                validamplitude = np.percentile(peak_amplitudes_left[peak_snrs_dv>SN_min],90)
+            #validhw = np.percentile(half_widths[peak_snrs_dv>SN_min*2])
             idx_to_keep = list()
             idx_to_del=list()
             for idx, (amplitude,hw,isi) in enumerate(zip(peak_amplitudes_left,half_widths,isis)):
@@ -280,13 +287,14 @@ def findAPs(trace, sample_rate,recording_mode, SN_min = 5,method = 'diff'):
                     minratio = .25
                 else:
                     minratio =.5
-                if amplitude<validamplitude*minratio or hw>validhw*(1/minratio):
+                if amplitude<validamplitude*minratio:# or hw>validhw*(1/minratio):
                     idx_to_del.append(idx)
                 else:
                     idx_to_keep.append(idx)
-                    validamplitude=amplitude
-                    validhw=hw
-           
+                    if minratio >.4:
+                        validamplitude=amplitude
+                    #validhw=hw
+           #%%
             baseline_idxs = baseline_idxs[idx_to_keep]         
             peak_idxs = peak_idxs[idx_to_keep]
             peak_snrs = peak_snrs[idx_to_keep]
@@ -303,7 +311,7 @@ def findAPs(trace, sample_rate,recording_mode, SN_min = 5,method = 'diff'):
             ahps_amplitudes= ahps_amplitudes[idx_to_keep]
             peak_to_trough_time = peak_to_trough_time[idx_to_keep]
             amplitude_ratios = amplitude_ratios[idx_to_keep]
-            #%
+            #%%
             ap_dict = {'peak_idx':peak_idxs,
                        'peak_times':peak_idxs/sample_rate,
                        'peak_snr_v':peak_snrs_v,
