@@ -170,10 +170,22 @@ def load_wavesurfer_file(WS_path): # works only for single sweep files
     #%%
     return outdict#voltage, frame_trigger, sRate, recording_mode, timestamp  , units[ephysidx]
 #%%
-def populateelphys_wavesurfer():
-  #%%
-    df_subject_wr_sessions=pd.DataFrame(lab.WaterRestriction() * experiment.Session())# * experiment.SessionDetails
-    df_subject_ids = pd.DataFrame(lab.Subject())
+    
+def populateelphys_wavesurfer(cores = 4):
+
+    ray.init(num_cpus = cores)
+    result_ids = []
+    subject_ids=np.unique(lab.Subject().fetch('subject_id'))
+    for subject_id in subject_ids:
+        result_ids.append(populateelphys_wavesurfer_core.remote(subject_id))            
+    ray.get(result_ids)       
+    ray.shutdown()
+
+@ray.remote
+def populateelphys_wavesurfer_core(subject_id):
+  #%
+    df_subject_wr_sessions=pd.DataFrame(lab.WaterRestriction() * experiment.Session()&'subject_id = {}'.format(subject_id))# * experiment.SessionDetails
+    df_subject_ids = pd.DataFrame(lab.Subject()&'subject_id = {}'.format(subject_id))
     if len(df_subject_wr_sessions)>0:
         subject_names = df_subject_wr_sessions['water_restriction_number'].unique()
         subject_names.sort()
@@ -201,7 +213,7 @@ def populateelphys_wavesurfer():
                     else:
                         wrname = 'no water restriction number for this mouse'
             if not wrname: # break out from session loop
-                print('no matching subject on DJ for {}'.format(session_dir.name))
+               # print('no matching subject on DJ for {}'.format(session_dir.name))
                 continue
             
             print('animal: '+ str(subject_id)+'  -  '+wrname)##
@@ -486,5 +498,66 @@ def populateelphys_wavesurfer():
                     dj.conn().ping()
                     ephys_cell_attached.SweepVisualStimulus().insert(cell_data['SweepVisualStimulus_list'], allow_direct_insert=True)
                     dj.conn().ping()
+
+#%%
+def ingest_AP_groups():
+    for cell in ephys_cell_attached.Cell():
+        key = {'subject_id': cell['subject_id'],
+               'session' : cell['session'],
+               'cell_number' : cell['cell_number']}
+        if len(ephysanal_cell_attached.APGroup()&key)==0:
+            ingest_AP_groups_core(key)
+            
+                    
+def ingest_AP_groups_core(key):
+    min_baseline_time = .1
+    max_integration_time = .1
+    
+    sweep_numbers = (ephys_cell_attached.Sweep()&key).fetch('sweep_number')
+    apgroup_list = list()
+    groupmember_list = list()
+    ap_group_number = 0
+    for sweep_number in sweep_numbers:
+        dj.conn().ping()
+        key['sweep_number'] = sweep_number
+        sweep_start_time,sweep_end_time = (ephys_cell_attached.Sweep()&key).fetch1('sweep_start_time','sweep_end_time')
+        sweep_end_time = float(sweep_end_time-sweep_start_time)
+        sweep_start_time = float(sweep_start_time)
+        ap_num,ap_max_time,ap_snr_v,ap_snr_dv = (ephys_cell_attached.Sweep()*ephysanal_cell_attached.ActionPotential()&key).fetch('ap_num','ap_max_time','ap_snr_v','ap_snr_dv')
+        ap_max_time = np.asarray(ap_max_time,float)
+        
+        isis_pre = np.diff(np.concatenate([[0],ap_max_time]))
+        isis_post = np.diff(np.concatenate([ap_max_time,[sweep_end_time]]))
+        
+        group_start_idxes = np.where(isis_pre>min_baseline_time)[0]
+        group_end_idxes = np.where(isis_post>max_integration_time)[0]
+        for group_start_idx in group_start_idxes:
+            if any(group_end_idxes>=group_start_idx):
+                apgroup_key = key.copy()
+                ap_group_number += 1
+                group_end_idx = group_end_idxes[np.argmax(group_end_idxes>=group_start_idx)]
+                ap_indices_now = np.arange(group_start_idx,group_end_idx+1)
+                
+                apgroup_key['ap_group_number'] = ap_group_number
+                apgroup_key['ap_group_ap_num'] = len(ap_indices_now)
+                apgroup_key['ap_group_start_time'] = ap_max_time[group_start_idx] + sweep_start_time
+                apgroup_key['ap_group_end_time'] = ap_max_time[group_end_idx] + sweep_start_time
+                apgroup_key['ap_group_min_snr_v'] = np.min(ap_snr_v[ap_indices_now])
+                apgroup_key['ap_group_min_snr_dv'] = np.min(ap_snr_dv[ap_indices_now])
+                apgroup_key['ap_group_pre_isi'] = isis_pre[group_start_idx]
+                apgroup_key['ap_group_post_isi'] = isis_post[group_end_idx]            
+                apgroup_list.append(apgroup_key)
+                for ap_idx in ap_indices_now:
+                    groupmember_key = key.copy()
+                    groupmember_key['ap_group_number'] = ap_group_number
+                    groupmember_key['ap_num'] = ap_num[ap_idx]
+                    groupmember_list.append(groupmember_key)
+                    
+    with dj.conn().transaction: #inserting one cell
+        print('uploading AP groups to datajoint: {}'.format(key))
+        ephysanal_cell_attached.APGroup().insert(apgroup_list, allow_direct_insert=True)
+        dj.conn().ping()
+        ephysanal_cell_attached.APGroup.APGroupMember().insert(groupmember_list, allow_direct_insert=True)            
+#%%
 
 
