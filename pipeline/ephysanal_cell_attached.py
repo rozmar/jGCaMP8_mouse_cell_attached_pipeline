@@ -10,7 +10,7 @@ from utils import utils_ephys
 import time
 #dj.conn()
 #%%
-schema = dj.schema(pipeline_tools.get_schema_name('ephys-anal'),locals())
+schema = dj.schema(pipeline_tools.get_schema_name('ephysanal_cell_attached'),locals())
 
 #%%
 
@@ -21,7 +21,7 @@ class ActionPotential(dj.Computed):
     ap_num : smallint unsigned # action potential number in sweep
     ---
     ap_max_index=null            : int unsigned # index of AP max on sweep
-    ap_max_time=null             : decimal(8,4) # time of the AP max relative to recording start
+    ap_max_time=null             : decimal(8,4) # time of the AP max relative to sweep start
     ap_snr_v=null                : double       #
     ap_snr_dv=null               : double       #
     ap_halfwidth=null            : double       # hw in ms
@@ -37,7 +37,7 @@ class ActionPotential(dj.Computed):
     """
     def make(self, key):
         #%%
-        #key = {'subject_id': 472002, 'session': 1, 'cell_number': 1, 'sweep_number': 1}
+        #key = {'subject_id': 478342, 'session': 1, 'cell_number': 6, 'sweep_number': 2}
         #print('starting - {}'.format(np.random.randint(1000)))
         sample_rate,recording_mode = (ephys_cell_attached.SweepMetadata()&key).fetch1('sample_rate','recording_mode')
         trace = (ephys_cell_attached.SweepResponse()&key).fetch1('response_trace')
@@ -113,7 +113,26 @@ class ActionPotential(dj.Computed):
             key['ap_num']=0
             self.insert1(key,skip_duplicates=True)
             
-            
+@schema
+class APGroup(dj.Imported):
+    definition = """
+    -> ephys_cell_attached.Sweep
+    ap_group_number   : int # unique within cell
+    ---
+    ap_group_ap_num     : int
+    ap_group_start_time : decimal(8,4) #- time of first AP in group from recording start (cell start time)
+    ap_group_end_time   : decimal(8,4) #- time of last AP in group from recording start (cell start time)
+    ap_group_min_snr_v  : double
+    ap_group_min_snr_dv : double
+    ap_group_pre_isi    : double
+    ap_group_post_isi   : double
+    """
+    class APGroupMember(dj.Part):
+        definition = """
+        -> master
+        -> ActionPotential
+        """
+
             
         #%%
 @schema
@@ -154,8 +173,11 @@ class CellSpikeParameters(dj.Computed):
     average_ap_wave_time               : longblob
     ap_isi_percentiles                 : longblob
     total_ap_num                       : longblob
+    ahp_freq_dependence=null           : double
     """
     def make(self, key):
+        #print(key)
+        min_isi = 0.1
         if key['recording_mode'] == 'current clamp': #for string purposes
             recmode = 'cc'
             max_amplitude = .005
@@ -171,28 +193,48 @@ class CellSpikeParameters(dj.Computed):
         
         snrs =(ActionPotential()&key).fetch('ap_snr_dv')#ephysanal_cell_attached.
         if len(snrs)<minimum_ap_num:
-            print('not enough aps')
+            #print('not enough aps')
             return None
         snrs_sorted = np.sort(snrs)[::-1]
         min_snr = np.max([snrs_sorted[np.min([len(snrs_sorted)-1,APnum_to_use])],absolute_min_snr])
-        isi_all = (ephys_cell_attached.SweepMetadata()*ActionPotential()&key&'ap_snr_dv > {}'.format(absolute_min_snr)).fetch('ap_isi')
+        isi_all,ap_amplitude_all,ap_ahp_amplitude_all = (ephys_cell_attached.SweepMetadata()*ActionPotential()&key&'ap_snr_dv > {}'.format(absolute_min_snr)).fetch('ap_isi','ap_amplitude','ap_ahp_amplitude')
+        
+        ap_amplitude_all = ap_amplitude_all[~np.isnan(isi_all)]
+        ap_ahp_amplitude_all = ap_ahp_amplitude_all[~np.isnan(isi_all)]
         isi_all = isi_all[~np.isnan(isi_all)]
         if len(isi_all)>minimum_ap_num:
             key['ap_isi_percentiles'] = np.percentile(isi_all,list(range(1,101,1)))
+            if len(isi_all)>100:
+                ahp_ratios = ap_ahp_amplitude_all/ap_amplitude_all
+                try:
+                    highfr_ahp_rato = np.nanmedian(ahp_ratios[(isi_all>.005)&(isi_all<.01)])
+                    lowfr_ahp_rato = np.nanmedian(ahp_ratios[(isi_all>.5)&(isi_all<10)])
+                    ahp_freq_dependence = lowfr_ahp_rato-highfr_ahp_rato
+                    key['ahp_freq_dependence']=ahp_freq_dependence 
+                except:
+                    key['ahp_freq_dependence']= None
+            else:
+                key['ahp_freq_dependence']= None
         else:
             key['ap_isi_percentiles'] = None
+            key['ahp_freq_dependence']= None
         key['total_ap_num'] = len(isi_all)
-        aps_needed = (ephys_cell_attached.SweepMetadata()*ActionPotential()&key&'ap_snr_dv > {}'.format(min_snr)&'ap_amplitude < {}'.format(max_amplitude))#ephysanal_cell_attached.
+        aps_needed = (ephys_cell_attached.SweepMetadata()*ActionPotential()&key&'ap_snr_dv > {}'.format(min_snr)&'ap_amplitude < {}'.format(max_amplitude)&'ap_isi > {}'.format(min_isi))#ephysanal_cell_attached.
         if len(aps_needed)<minimum_ap_num:
-            amplitudes_sorted = np.sort((ephys_cell_attached.SweepMetadata()*ActionPotential()&key&'ap_snr_dv > {}'.format(min_snr)).fetch('ap_amplitude'))
+            amplitudes_sorted = np.sort((ephys_cell_attached.SweepMetadata()*ActionPotential()&key&'ap_snr_dv > {}'.format(min_snr)&'ap_isi > {}'.format(min_isi)).fetch('ap_amplitude'))
             try:
                 max_amplitude = amplitudes_sorted[minimum_ap_num-1]*1.01
-                aps_needed = (ephys_cell_attached.SweepMetadata()*ActionPotential()&key&'ap_snr_dv > {}'.format(min_snr)&'ap_amplitude < {}'.format(max_amplitude))#ephysanal_cell_attached.
-            except:
-                print('only {} ap left'.format(len(amplitudes_sorted)))
-                pass
+                aps_needed = (ephys_cell_attached.SweepMetadata()*ActionPotential()&key&'ap_snr_dv > {}'.format(min_snr)&'ap_amplitude < {}'.format(max_amplitude)&'ap_isi > {}'.format(min_isi))#ephysanal_cell_attached.
+            except: #try without the ISI restriction
+                amplitudes_sorted = np.sort((ephys_cell_attached.SweepMetadata()*ActionPotential()&key&'ap_snr_dv > {}'.format(min_snr)).fetch('ap_amplitude'))
+                try:
+                    max_amplitude = amplitudes_sorted[minimum_ap_num-1]*1.01
+                    aps_needed = (ephys_cell_attached.SweepMetadata()*ActionPotential()&key&'ap_snr_dv > {}'.format(min_snr)&'ap_amplitude < {}'.format(max_amplitude)&'ap_isi > {}'.format(min_isi))#ephysanal_cell_attached.
+                except:
+                    print('only {} ap left'.format(len(amplitudes_sorted)))
+                    pass
             if len(aps_needed)<minimum_ap_num:
-                print('not enough aps')
+                #print('not enough aps')
                 return None
             else:
                 print('max amplitude changed to {}'.format(max_amplitude))
