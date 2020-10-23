@@ -24,6 +24,12 @@ class Session(dj.Manual):
     -> lab.Person
     -> lab.Rig
     """
+@schema
+class SessionComment(dj.Imported):
+    definition = """
+    -> Session
+    session_comment : varchar(512)
+    """
 
 @schema
 class VisualStimTrial(dj.Imported):
