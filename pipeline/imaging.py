@@ -6,6 +6,8 @@ schema = dj.schema(get_schema_name('imaging'),locals())
 from PIL import Image
 import numpy as np
 import os
+import pandas as pd
+import datetime
 #%%
 @schema
 class Movie(dj.Imported):
@@ -67,11 +69,72 @@ class MovieNote(dj.Imported):
     
 @schema
 class MoviePowerPostObjective(dj.Imported):
-    definition = """
+    definition = """#beam expander info needed, populate after movienote
     -> Movie
     ---
     movie_power                           : decimal(6,2)          # power after objective in mW - calculated
+    movie_power_days_to_calibration       : int
     """ 
+    def make(self, key):
+        #%%
+        #key = {'subject_id': 478348, 'session': 1, 'movie_number': 35}
+        
+        if len(MovieNote()&key) == 0:#imaging.
+            print('no notes for {}'.format(key))
+        else:
+            print(key)
+            movie_hbeam_power = float((MovieMetaData()&key).fetch1('movie_hbeam_power'))#imaging.
+            try:
+                beamexp = (MovieNote()&key&'movie_note_type = "beam expander"').fetch1('movie_note')#imaging
+            except:
+                beamexp = 'nan' 
+            session_date = (experiment.Session()&key).fetch1('session_date')
+            calibration_curve_names =os.listdir(dj.config['locations.metadata_genie_2p_rig_powers'])
+            calibration_times = list()
+            calibration_files = list()
+            for calibration_curve_name in calibration_curve_names:
+                try:
+                    calibration_times.append(datetime.datetime.strptime(calibration_curve_name[:-4],'%Y-%m-%d').date())
+                    calibration_files.append(calibration_curve_name)
+                except:
+                    pass#print(calibration_curve_name)
+            needed_idx = np.argmin(np.abs(session_date-np.asarray(calibration_times)))
+            time_difi = session_date-np.asarray(calibration_times)[needed_idx]
+            key['movie_power_days_to_calibration'] = time_difi.days
+            df = pd.read_csv(os.path.join(dj.config['locations.metadata_genie_2p_rig_powers'],np.asarray(calibration_files)[needed_idx]))
+            x_col = None
+            y_col = None
+            for column_name in df.keys():
+                if (beamexp == 'nan'or beamexp =='none') and 'power' in column_name and 'scanning' in column_name and 'exp' not in column_name:
+                    y_col = column_name
+                elif '2' in beamexp and 'power' in column_name and 'scanning' in column_name and 'exp' in column_name and '2' in column_name:
+                    y_col = column_name
+                elif 'command' in column_name:
+                    x_col = column_name
+            xvals = df[x_col].values
+            yvals = df[y_col].values
+            xvals_real = list()
+            yvals_real = list()
+            for x,y in zip(xvals,yvals):
+                try:
+                    x = float(x)
+                    y = float(y)
+                    xvals_real.append(x)
+                    yvals_real.append(y)
+                except:
+                    pass
+                    
+            p = np.polyfit(xvals_real,yvals_real,1)
+            key['movie_power']=np.polyval(p,movie_hbeam_power)
+            #%%
+            self.insert1(key,skip_duplicates=True)
+                #break
+            
+            
+        
+        
+            
+    #%%
     
 @schema
 class MovieFrameTimes(dj.Imported):
@@ -175,12 +238,15 @@ class ROI(dj.Imported):
     roi_centroid_y                  : double        # ROI centroid  y, pixels
     roi_xpix                        : longblob      # pixel mask 
     roi_ypix                        : longblob      # pixel mask 
+    roi_pixel_num                   : int
+    roi_weights                     : longblob      # weight of each pixel
     roi_time_offset                 : double        # time offset of ROI relative to frame time
     roi_aspect_ratio                : double
     roi_compact                     : double
     roi_radius                      : double
     roi_skew                        : double
     """
+    
 @schema
 class ROINeuropil(dj.Imported): 
 # ROI (Region of interest - e.g. cells)
@@ -190,6 +256,7 @@ class ROINeuropil(dj.Imported):
     ---
     neuropil_xpix                        : longblob      # pixel mask 
     neuropil_ypix                        : longblob      # pixel mask 
+    neuropil_pixel_num                   : int
     """
     
 @schema
@@ -200,6 +267,10 @@ class ROITrace(dj.Imported):
     -> MovieChannel
     ---
     roi_f                           : longblob
+    roi_f_mean                      : double
+    roi_f_median                    : double
+    roi_f_min                       : double
+    roi_f_max                       : double
     """    
 
 
@@ -210,5 +281,9 @@ class ROINeuropilTrace(dj.Imported):
     -> ROINeuropil
     -> MovieChannel
     ---
-    neuropil_f                      : longblob      # spikepursuit
+    neuropil_f                           : longblob      # spikepursuit
+    neuropil_f_mean                      : double
+    neuropil_f_median                    : double
+    neuropil_f_min                       : double
+    neuropil_f_max                       : double
     """
