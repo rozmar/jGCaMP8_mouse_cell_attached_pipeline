@@ -336,6 +336,11 @@ def cell_clustering_plots(recording_mode = 'current clamp',
     apfeatureslist = (ephys_cell_attached.Cell()*ephysanal_cell_attached.CellSpikeParameters()&'ap_snr_mean > {}'.format(minsnr)&'recording_mode = "{}"'.format(recording_mode)& 'ap_quantity > {}'.format(minapnum)).fetch(*features_all)
     ap_cell_data = dict()
     for data,data_name in zip(apfeatureslist,features_all):
+        try:
+            if any(np.isnan(data)):#remove NANs
+                data[np.isnan(data)]=np.nanmedian(data)
+        except:
+            pass
         if data_name not in features_needed:
             continue
         if data_name == 'ap_isi_percentiles':
