@@ -37,7 +37,7 @@ def fetch_sheet_titles(spreadsheetname):
         sheetnames.append(sheet.title)
     return sheetnames
 #%
-def fetch_sheet(spreadsheet_name,sheet_title):
+def fetch_sheet(spreadsheet_name,sheet_title,transposed = False):
     #%
     wb = client.open(spreadsheet_name)
 # =============================================================================
@@ -54,7 +54,11 @@ def fetch_sheet(spreadsheet_name,sheet_title):
 #         idx_now = sheetnames.index(sheet_title)
 #         if idx_now > -1:
 # =============================================================================
-        params = {'majorDimension':'ROWS'}
+        #%%
+        if transposed:
+            params = {'majorDimension':'COLUMNS'}
+        else:
+            params = {'majorDimension':'ROWS'}
         temp = wb.values_get(sheet_title+'!A1:QQ500',params)
         temp = temp['values']
         header = temp.pop(0)
@@ -67,6 +71,7 @@ def fetch_sheet(spreadsheet_name,sheet_title):
             print([spreadsheet_name,sheet_title])
             print(header)
             print(data)
+            #%%
         return df
 # =============================================================================
 #         else:
@@ -109,7 +114,7 @@ def fetch_lab_metadata(ID):
     else:
         return None
 
-def update_metadata(notebook_name,metadata_dir):
+def update_metadata(notebook_name,metadata_dir,transposed = False):
     #%%
     lastmodify = fetch_lastmodify_time(notebook_name)
     try:
@@ -123,7 +128,7 @@ def update_metadata(notebook_name,metadata_dir):
         for session in sessions:
             while True:
                 try:    
-                    df_wr = fetch_sheet(notebook_name,session)
+                    df_wr = fetch_sheet(notebook_name,session,transposed)
                     break
                 except gspread.exceptions.APIError as err:
                     print(err)
