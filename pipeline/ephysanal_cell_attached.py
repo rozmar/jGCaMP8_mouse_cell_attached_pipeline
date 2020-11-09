@@ -133,7 +133,136 @@ class APGroup(dj.Imported):
         -> ActionPotential
         """
 
+@schema
+class IngestAPGroup(dj.Imported):
+    definition = """
+    -> ephys_cell_attached.Sweep
+    ---
+    ap_group_complete : int
+    """
+    def make(self, key):
+        key_original = key.copy()
+        key_original['ap_group_complete'] = 1
+        min_baseline_time = .1
+        max_integration_time = .1
+        
+        sweep_numbers = (ephys_cell_attached.Sweep()&key).fetch('sweep_number')
+        apgroup_list = list()
+        groupmember_list = list()
+        ap_group_number = 0
+        for sweep_number in sweep_numbers:
+            dj.conn().ping()
+            key['sweep_number'] = sweep_number
+            sweep_start_time,sweep_end_time = (ephys_cell_attached.Sweep()&key).fetch1('sweep_start_time','sweep_end_time')
+            sweep_end_time = float(sweep_end_time-sweep_start_time)
+            sweep_start_time = float(sweep_start_time)
+            ap_num,ap_max_time,ap_snr_v,ap_snr_dv = (ephys_cell_attached.Sweep()*ActionPotential()&key).fetch('ap_num','ap_max_time','ap_snr_v','ap_snr_dv')#ephysanal_cell_attached
+            ap_max_time = np.asarray(ap_max_time,float)
             
+            isis_pre = np.diff(np.concatenate([[0],ap_max_time]))
+            isis_post = np.diff(np.concatenate([ap_max_time,[sweep_end_time]]))
+            
+            group_start_idxes = np.where(isis_pre>min_baseline_time)[0]
+            group_end_idxes = np.where(isis_post>max_integration_time)[0]
+            for group_start_idx in group_start_idxes:
+                if any(group_end_idxes>=group_start_idx):
+                    apgroup_key = key.copy()
+                    ap_group_number += 1
+                    group_end_idx = group_end_idxes[np.argmax(group_end_idxes>=group_start_idx)]
+                    ap_indices_now = np.arange(group_start_idx,group_end_idx+1)
+                    
+                    apgroup_key['ap_group_number'] = ap_group_number
+                    apgroup_key['ap_group_ap_num'] = len(ap_indices_now)
+                    apgroup_key['ap_group_start_time'] = ap_max_time[group_start_idx] + sweep_start_time
+                    apgroup_key['ap_group_end_time'] = ap_max_time[group_end_idx] + sweep_start_time
+                    apgroup_key['ap_group_min_snr_v'] = np.min(ap_snr_v[ap_indices_now])
+                    apgroup_key['ap_group_min_snr_dv'] = np.min(ap_snr_dv[ap_indices_now])
+                    apgroup_key['ap_group_pre_isi'] = isis_pre[group_start_idx]
+                    apgroup_key['ap_group_post_isi'] = isis_post[group_end_idx]            
+                    apgroup_list.append(apgroup_key)
+                    for ap_idx in ap_indices_now:
+                        groupmember_key = key.copy()
+                        groupmember_key['ap_group_number'] = ap_group_number
+                        groupmember_key['ap_num'] = ap_num[ap_idx]
+                        groupmember_list.append(groupmember_key)
+                        
+        #with dj.conn().transaction: #inserting one cell
+        print('uploading AP groups to datajoint: {}'.format(key))
+        APGroup().insert(apgroup_list, allow_direct_insert=True)#ephysanal_cell_attached
+        dj.conn().ping()
+        APGroup.APGroupMember().insert(groupmember_list, allow_direct_insert=True)      #ephysanal_cell_attached
+        self.insert1(key,skip_duplicates=True)
+
+
+
+@schema
+class APGroupTrace(dj.Imported):
+    definition = """
+    -> APGroup
+    ---
+    ap_group_trace            : longblob
+    ap_group_trace_offset     : double
+    ap_group_trace_multiplier : double
+    ap_group_trace_peak_idx   : int
+    """  
+@schema
+class IngestAPGroupTrace(dj.Imported):  
+    definition = """
+    -> ephys_cell_attached.Sweep
+    ---
+    ap_group_trace_complete       : int #1 if done
+    """     
+    def make(self, key):
+        #%%
+# =============================================================================
+#         key = {'subject_id': 471991,
+#                'session': 1,
+#                'cell_number': 1,
+#                'sweep_number': 0}
+# =============================================================================
+        
+        time_back = .5
+        time_forward = 1.5
+        
+        apgroups = APGroup()&key#ephysanal_cell_attached.
+        if len(apgroups)==0:
+            #return None
+            pass
+        response_trace = (ephys_cell_attached.SweepResponse()&key).fetch1('response_trace')
+        sample_rate,recording_mode = (ephys_cell_attached.SweepMetadata()&key).fetch1('sample_rate','recording_mode')
+        step_back = int(time_back*sample_rate)
+        step_forward = int(time_forward*sample_rate)
+        #%
+        apgrouptrace_list = list()
+        for apgroup in apgroups:
+            
+            apgroup_members = APGroup.APGroupMember()&apgroup#ephysanal_cell_attached.
+            ap_nums = apgroup_members.fetch('ap_num')
+            first_ap = ActionPotential()&key&'ap_num = {}'.format(np.min(ap_nums))#ephysanal_cell_attached.
+            ap_max_index,ap_amplitude,ap_baseline_current,ap_baseline_voltage = first_ap.fetch1('ap_max_index','ap_amplitude','ap_baseline_current','ap_baseline_voltage')
+            actual_step_back = np.min([step_back,ap_max_index])
+            actual_step_forward = np.min([step_forward,len(response_trace)-ap_max_index])
+            
+            if recording_mode == 'voltage clamp':
+                baseline_value = ap_baseline_current
+                multiplier = -1
+            elif recording_mode == 'current clamp':
+                multiplier = 1
+                baseline_value = ap_baseline_voltage
+            trace = multiplier*(response_trace[ap_max_index-actual_step_back:actual_step_forward+ap_max_index]-baseline_value)/ap_amplitude
+            key_apgrouptrace = key.copy()
+            key_apgrouptrace['ap_group_number'] = apgroup['ap_group_number']
+            key_apgrouptrace['ap_group_trace_offset']=baseline_value
+            key_apgrouptrace['ap_group_trace_multiplier']=multiplier/ap_amplitude
+            key_apgrouptrace['ap_group_trace_peak_idx']=actual_step_back
+            key_apgrouptrace['ap_group_trace']=trace
+            apgrouptrace_list.append(key_apgrouptrace)
+            #trace_time = np.arange(-actual_step_back,actual_step_forward)/sample_rate
+            #plt.plot(trace_time,trace)
+        APGroupTrace().insert(apgrouptrace_list, allow_direct_insert=True)#imaging_gt.
+        key['ap_group_trace_complete'] = 1
+        self.insert1(key,skip_duplicates=True)
+        
         #%%
 @schema
 class CellSpikeParameters(dj.Computed):
