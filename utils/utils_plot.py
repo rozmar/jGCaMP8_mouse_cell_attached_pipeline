@@ -2,6 +2,13 @@ import numpy as np
 import datajoint as dj
 dj.conn()
 from pipeline import pipeline_tools,lab, experiment, ephys_cell_attached,ephysanal_cell_attached, imaging, imaging_gt
+import scipy.ndimage as ndimage
+
+def gaussFilter(sig,sRate,sigma = .00005):
+    si = 1/sRate
+    #sigma = .00005
+    sig_f = ndimage.gaussian_filter(sig,sigma/si)
+    return sig_f
 
 def remove_nans_from_trace(bin_mean):
     while sum(np.isnan(bin_mean))>0:
@@ -21,12 +28,18 @@ def remove_nans_from_trace(bin_mean):
     
 
 def generate_superresolution_trace(x_conc,y_conc,bin_step,bin_size,function = 'mean'):
+    # TODO use gaussian averaging instead of boxcar
     bin_centers = np.arange(np.min(x_conc),np.max(x_conc),bin_step)
     bin_mean = list()
     bin_median = list()
+    bin_std = list()
+    bin_n = list()
     for bin_center in bin_centers:
-        bin_mean.append(np.mean(y_conc[(x_conc>bin_center-bin_size/2) & (x_conc<bin_center+bin_size/2)]))
-        bin_median.append(np.median(y_conc[(x_conc>bin_center-bin_size/2) & (x_conc<bin_center+bin_size/2)]))
+        idxes = (x_conc>bin_center-bin_size/2) & (x_conc<bin_center+bin_size/2)
+        bin_mean.append(np.mean(y_conc[idxes]))
+        bin_median.append(np.median(y_conc[idxes]))
+        bin_std.append(np.std(y_conc[idxes]))
+        bin_n.append(np.sum(idxes))
     bin_mean = bin_median
     bin_mean = remove_nans_from_trace(bin_mean)
     bin_median = remove_nans_from_trace(bin_median)
@@ -34,9 +47,21 @@ def generate_superresolution_trace(x_conc,y_conc,bin_step,bin_size,function = 'm
         trace = bin_median
     else:
         trace = bin_mean
-    return bin_centers,trace
+    out_dict = {'bin_centers':bin_centers,
+                'trace_mean':bin_mean,
+                'trace_median':bin_median,
+                'trace_std':bin_std,
+                'trace_n':bin_n}
+    if function == 'all':
+        return out_dict
+    else:
+        return bin_centers,trace
 
-def collect_ca_wave_parameters(ca_wave_parameters,cawave_properties_needed):
+def collect_ca_wave_parameters(ca_wave_parameters,cawave_properties_needed,ephys_properties_needed):
+    parameters_must_be_downloaded = ['subject_id','session','cell_number','sweep_number','ap_group_number']
+    cawave_properties_all = cawave_properties_needed.copy()
+    cawave_properties_all.extend(parameters_must_be_downloaded)
+    cawave_properties_all.extend(ephys_properties_needed)
     key= {'neuropil_number': ca_wave_parameters['neuropil_number'],
           'neuropil_subtraction': ca_wave_parameters['neuropil_subtraction'],#'none','0.7','calculated'
           'session_calcium_sensor':None,#'GCaMP7F',#'GCaMP7F','XCaMPgf','456','686','688'
@@ -53,10 +78,15 @@ def collect_ca_wave_parameters(ca_wave_parameters,cawave_properties_needed):
     for sensor in ca_wave_parameters['sensors']:
         print(sensor)
         key['session_calcium_sensor'] = sensor
-        cawaves_all = imaging_gt.ROIDwellTime()*imaging.ROI()*imaging.MoviePowerPostObjective()*imaging.MovieMetaData()*imaging.MovieNote()*imaging_gt.SessionCalciumSensor()*ephysanal_cell_attached.APGroup()*imaging_gt.CalciumWave.CalciumWaveProperties()*imaging_gt.CalciumWave()*imaging_gt.CalciumWave.CalciumWaveNeuropil()&'movie_note_type = "quality"'
+        cawaves_all = ephysanal_cell_attached.CellSpikeParameters()*imaging_gt.ROIDwellTime()*imaging.ROI()*imaging.MoviePowerPostObjective()*imaging.MovieMetaData()*imaging.MovieNote()*imaging_gt.SessionCalciumSensor()*ephysanal_cell_attached.APGroup()*imaging_gt.CalciumWave.CalciumWaveProperties()*imaging_gt.CalciumWave()*imaging_gt.CalciumWave.CalciumWaveNeuropil()&'movie_note_type = "quality"'
         cellwave_by_cell_list = list()
         for cellkey in ephys_cell_attached.Cell():
-            
+# =============================================================================
+#             cell_ephys_data = dict()
+#             ephys_properties_list = (ephysanal_cell_attached.CellSpikeParameters()&cellkey).fetch(*ephys_properties_needed)
+#             for data,data_name in zip(ephys_properties_list,ephys_properties_needed):
+#                 cell_ephys_data[data_name] = data 
+# =============================================================================
             cawaves = cawaves_all& key & snr_cond & preisi_cond & postisi_cond & basline_dff_cond & basline_dff_cond_2 & cellkey  
             if ca_wave_parameters['only_manually_labelled_movies']:
                 cawaves = cawaves&'movie_note = "1"'
@@ -64,8 +94,9 @@ def collect_ca_wave_parameters(ca_wave_parameters,cawave_properties_needed):
                 continue
             #print(cellkey)
             cell_data = dict()
-            cawave_properties_list = cawaves.fetch(*cawave_properties_needed)
-            for data,data_name in zip(cawave_properties_list,cawave_properties_needed):
+            #cell_data['cell_ephys_data']=cell_ephys_data
+            cawave_properties_list = cawaves.fetch(*cawave_properties_all)
+            for data,data_name in zip(cawave_properties_list,cawave_properties_all):
                 cell_data[data_name] = data 
             cell_data['movie_hmotors_sample_z'] = np.asarray(cell_data['movie_hmotors_sample_z'],float)
             cell_data['movie_power'] = np.asarray(cell_data['movie_power'],float)
@@ -73,6 +104,7 @@ def collect_ca_wave_parameters(ca_wave_parameters,cawave_properties_needed):
             ap_num_list = np.unique(cell_data['ap_group_ap_num'])
             for property_name in cawave_properties_needed:
                 cell_data['{}_mean_per_ap'.format(property_name)]=list()
+                cell_data['{}_median_per_ap'.format(property_name)]=list()
                 cell_data['{}_std_per_ap'.format(property_name)]=list()
                 cell_data['{}_values_per_ap'.format(property_name)]=list()
             cell_data['event_num_per_ap'] = list()
@@ -81,6 +113,7 @@ def collect_ca_wave_parameters(ca_wave_parameters,cawave_properties_needed):
                 cell_data['event_num_per_ap'].append(sum(idx))
                 for property_name in cawave_properties_needed:
                     cell_data['{}_mean_per_ap'.format(property_name)].append(np.nanmean(cell_data[property_name][idx]))
+                    cell_data['{}_median_per_ap'.format(property_name)].append(np.nanmedian(cell_data[property_name][idx]))
                     cell_data['{}_std_per_ap'.format(property_name)].append(np.nanstd(cell_data[property_name][idx]))
                     cell_data['{}_values_per_ap'.format(property_name)].append(cell_data[property_name][idx])
     
@@ -102,7 +135,10 @@ def collect_ca_wave_traces( ca_wave_parameters,ca_waves_dict,parameters   ):
                 'cawave_dff_list':list(),
                 'cawave_time_list':list(),
                 'cawave_lengths':list(),
-                'cawave_f0_list':list()}
+                'cawave_f0_list':list(),
+                'cawave_ap_group_length_list':list(),
+                'cawave_snr_list':list(),
+                'cawave_f_corr_normalized_list':list()}
 
         key= {'neuropil_number': ca_wave_parameters['neuropil_number'],
               'neuropil_subtraction': ca_wave_parameters['neuropil_subtraction'],#'none','0.7','calculated'
@@ -142,8 +178,12 @@ def collect_ca_wave_traces( ca_wave_parameters,ca_waves_dict,parameters   ):
             cawave_time_list = list()
             cawave_lengths = list()
             cawave_f0_list = list()
-            cawave_fs,cawave_times,cawave_fneus,cawave_f0s,cawave_rneus = (cawaves&'ap_group_ap_num={}'.format(parameters['ap_num_to_plot'])).fetch('cawave_f','cawave_time','cawave_fneu','cawave_baseline_f','cawave_rneu')
-            for cawave_f,cawave_time,cawave_fneu,cawave_f0,cawave_rneu in zip(cawave_fs,cawave_times,cawave_fneus,cawave_f0s,cawave_rneus ):
+            cawave_ap_group_length_list = list()
+            cawave_snr_list = list()
+            cawave_f_corr_normalized_list = list()
+            cawave_fs,cawave_times,cawave_fneus,cawave_f0s,cawave_rneus,ap_group_start_time,ap_group_end_time,cawave_snrs,cawave_peak_amplitude_fs,cawave_peak_amplitude_dffs = (cawaves&'ap_group_ap_num={}'.format(parameters['ap_num_to_plot'])).fetch('cawave_f','cawave_time','cawave_fneu','cawave_baseline_f','cawave_rneu','ap_group_start_time','ap_group_end_time','cawave_snr','cawave_peak_amplitude_f','cawave_peak_amplitude_dff')
+            ap_group_lengths = np.asarray(ap_group_end_time,float)-np.asarray(ap_group_start_time,float)
+            for cawave_f,cawave_time,cawave_fneu,cawave_f0,cawave_rneu,ap_group_length,cawave_snr,cawave_peak_amplitude_f in zip(cawave_fs,cawave_times,cawave_fneus,cawave_f0s,cawave_rneus,ap_group_lengths,cawave_snrs,cawave_peak_amplitude_fs ):
                 cawave_f_corr = cawave_f-cawave_fneu*cawave_rneu-cawave_f0
                 cawave_dff = (cawave_f_corr)/cawave_f0
                 #zeroidx = np.argmin(np.abs(cawave_time))
@@ -152,6 +192,9 @@ def collect_ca_wave_traces( ca_wave_parameters,ca_waves_dict,parameters   ):
                 cawave_dff_list.append(np.asarray(cawave_dff,float))
                 cawave_time_list.append(np.asarray(cawave_time,float))
                 cawave_f0_list.append(cawave_f0)
+                cawave_ap_group_length_list.append(ap_group_length)
+                cawave_snr_list.append(cawave_snr)
+                cawave_f_corr_normalized_list.append(np.asarray(cawave_f_corr,float)/cawave_peak_amplitude_f)
             if len(np.unique(cawave_lengths))>1:
                 print('not equal traces')
                 #time.sleep(1000)
@@ -160,12 +203,18 @@ def collect_ca_wave_traces( ca_wave_parameters,ca_waves_dict,parameters   ):
                          'cawave_time_list':cawave_time_list,
                          'cawave_lengths':cawave_lengths,
                          'cell_key':cell_data['cell_key'],
-                         'cawave_f0_list':cawave_f0_list}
+                         'cawave_f0_list':cawave_f0_list,
+                         'cawave_ap_group_length_list':cawave_ap_group_length_list,
+                         'cawave_snr_list':cawave_snr_list,
+                         'cawave_f_corr_normalized_list':cawave_f_corr_normalized_list}
             ca_traces_by_cell_list.append(cell_dict)
             ca_traces_dict[sensor]['cawave_f_corr_list'].extend(cawave_f_corr_list)
             ca_traces_dict[sensor]['cawave_dff_list'].extend(cawave_dff_list)
             ca_traces_dict[sensor]['cawave_time_list'].extend(cawave_time_list)
             ca_traces_dict[sensor]['cawave_lengths'].extend(cawave_lengths)
             ca_traces_dict[sensor]['cawave_f0_list'].extend(cawave_f0_list)
+            ca_traces_dict[sensor]['cawave_ap_group_length_list'].extend(cawave_ap_group_length_list)
+            ca_traces_dict[sensor]['cawave_snr_list'].extend(cawave_snr_list)
+            ca_traces_dict[sensor]['cawave_f_corr_normalized_list'].extend(cawave_f_corr_normalized_list)
         ca_traces_dict_by_cell[sensor] = ca_traces_by_cell_list
     return ca_traces_dict,ca_traces_dict_by_cell
