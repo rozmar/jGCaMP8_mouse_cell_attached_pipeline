@@ -17,6 +17,137 @@ def gaussFilter(sig,sRate,sigma = .00005):
     return sig_f
 #%%
 @schema
+class MovieDepth(dj.Computed):
+    definition = """
+    -> imaging.Movie
+    ---
+    movie_depth=null          : double # depth from pia in microns
+    """
+    def make(self, key):
+        #key = {'subject_id':471991,'session':1,'movie_number':2}
+        try:
+            movie_hmotors_sample_z = float((imaging.MovieMetaData()&key).fetch1('movie_hmotors_sample_z'))
+            if movie_hmotors_sample_z<0:
+                try:
+                    depth = (ephys_cell_attached.Cell()*ROISweepCorrespondance()&key).fetch1('depth')#imaging_gt.
+                    key['movie_depth'] = depth
+                except:
+                    pass
+            else:
+                key['movie_depth'] = movie_hmotors_sample_z
+        except:
+            print('could not extract movie depth for {}'.format(key))
+        
+        self.insert1(key,skip_duplicates=True)
+
+@schema
+class MovieCalciumWaveSNR(dj.Computed):  
+    definition = """ # the aim of this table is to find Movies with different SNR
+    -> imaging.Movie
+    ---
+    movie_event_num                   : int     #only events with given minimum inter-event intervals
+    movie_ap_num                      : double  #only in the events
+    movie_mean_cawave_snr_per_ap      : double  
+    movie_median_cawave_snr_per_ap    : double
+    movie_mean_ap_snr                 : double
+    movie_median_ap_snr               : double
+    """     
+    def make(self, key):
+        #%%
+        min_pre_isi = .5
+        min_post_isi = .5
+        preisi_cond = 'ap_group_pre_isi>{}'.format(min_pre_isi)
+        postisi_cond = 'ap_group_post_isi>{}'.format(min_post_isi)
+# =============================================================================
+#         key = {'subject_id':472181,
+#                'movie_number':0,
+#                }
+# =============================================================================
+        key_extra = {'channel_number':1,
+                     'roi_type':'Suite2P',
+                     'motion_correction_method':'Suite2P',
+                     'roi_type':'Suite2P',
+                     'neuropil_number':1,
+                     'neuropil_subtraction':'0.8',
+                     'gaussian_filter_sigma':10
+                     }
+        cawaves = ephysanal_cell_attached.APGroup()*CalciumWave.CalciumWaveProperties()&key&key_extra&preisi_cond&postisi_cond#imaging_gt.
+        cawave_snr,ap_group_ap_num,ap_group_min_snr_dv=(cawaves).fetch('cawave_snr','ap_group_ap_num','ap_group_min_snr_dv')
+        #%%
+        if len(cawave_snr)>0:
+            cawave_snr_per_ap = cawave_snr/ap_group_ap_num
+            key['movie_event_num'] = len(cawave_snr)
+            key['movie_ap_num'] = np.sum(ap_group_ap_num)
+            key['movie_mean_cawave_snr_per_ap'] = np.nanmean(cawave_snr_per_ap)
+            key['movie_median_cawave_snr_per_ap'] = np.nanmedian(cawave_snr_per_ap)
+            key['movie_mean_ap_snr'] = np.nanmean(ap_group_min_snr_dv)
+            key['movie_median_ap_snr'] = np.nanmedian(ap_group_min_snr_dv)
+            self.insert1(key,skip_duplicates=True)
+        
+        #%%
+
+@schema
+class SessionROIFPercentile(dj.Computed):
+    definition = """
+    -> imaging.ROI
+    -> imaging.MovieChannel
+    ---
+    roi_f0_percentile          : double
+    roi_f0_percentile_value    : double
+    """
+
+    
+@schema
+class SessionROIFDistribution(dj.Computed): # after correcting for power but not depth
+    definition = """
+    -> experiment.Session
+    -> imaging.ROIType
+    -> imaging.MotionCorrectionMethod
+    ---
+    session_f0_percentiles         :blob # 1,2,3,4,5,6...
+    session_f0_percentile_values   :blob # F0 values corresponding to each precentile
+    """
+    def make(self, key):
+        #%%
+        
+        #key = {'subject_id':472181,'channel_number':1,'roi_type':'Suite2P','motion_correction_method':'Suite2P'}
+        
+        session_f0_percentiles = np.arange(0,101,1)
+        rois = imaging.MoviePowerPostObjective()*imaging.ROITrace()&key&'channel_number = 1'
+        if len(rois)==0:
+            return None
+        #print(key)    
+        f,power,movie_number,roi_number= rois.fetch('roi_f_min','movie_power','movie_number','roi_number')#
+        power = np.asarray(power,float)
+        f = np.asarray(f,float)
+        f_corr = f/(power**2)
+        #needed = np.isnan(f_corr)== False
+        session_f0_percentile_values=np.percentile(f_corr,session_f0_percentiles)
+        order = np.argsort(f_corr)
+        
+        f_corr = f_corr[order]
+        movie_number = movie_number[order]
+        roi_number = roi_number[order]
+        percentiles = np.arange(len(f_corr))/len(f_corr)*100
+        key_list = list()
+        for f_corr_now,movie_number_now,roi_number_now,percentile in zip(f_corr,movie_number,roi_number,percentiles):
+            key_now = key.copy()
+            key_now['channel_number'] = 1
+            key_now['roi_f0_percentile'] = percentile
+            key_now['roi_f0_percentile_value'] = f_corr_now
+            key_now['movie_number'] = movie_number_now
+            key_now['roi_number'] = roi_number_now
+            key_list.append(key_now)
+        key['session_f0_percentiles'] = session_f0_percentiles
+        key['session_f0_percentile_values'] = session_f0_percentile_values
+        #%
+        SessionROIFPercentile().insert(key_list, allow_direct_insert=True)#i
+        self.insert1(key,skip_duplicates=True)
+    #%%
+
+
+
+@schema
 class SessionCalciumSensor(dj.Computed):
     definition = """
     -> experiment.Session
@@ -261,6 +392,7 @@ class CalciumWave(dj.Imported):
         cawave_peak_amplitude_dff  : double
         cawave_rise_time           : double
         cawave_snr                 : double
+        cawave_half_decay_time     : double # peak to half peak time
         """
 @schema
 class IngestCalciumWave(dj.Computed):
@@ -279,7 +411,7 @@ class IngestCalciumWave(dj.Computed):
         ca_wave_time_back_for_baseline = .2
         ca_wave_time_forward = 3
         global_f0_time = 10 #seconds
-        max_rise_time = .1 #seconds to find maximum after last AP in a group
+        max_rise_time = .02 #seconds to find maximum after last AP in a group # 0.1 for pyr
         gaussian_filter_sigmas = CalciumWaveFilter().fetch('gaussian_filter_sigma')#imaging_gt.
         neuropil_subtractions = CalciumWaveNeuropilHandling().fetch('neuropil_subtraction')#imaging_gt.
         groundtruth_rois = ROISweepCorrespondance()&key#imaging_gt.
@@ -408,6 +540,11 @@ class IngestCalciumWave(dj.Computed):
                                 ca_wave_properties_now['cawave_peak_amplitude_dff'] = ca_wave_properties_now['cawave_peak_amplitude_f']/ca_wave_properties_now['cawave_baseline_f']
                                 ca_wave_properties_now['cawave_rise_time'] = cawave_time[peak_amplitude_idx]
                                 ca_wave_properties_now['cawave_snr'] = ca_wave_properties_now['cawave_peak_amplitude_f']/ca_wave_properties_now['cawave_baseline_f_std']
+                                
+                                cawave_f_now_normalized = (cawave_f_now-ca_wave_properties_now['cawave_baseline_f'])/ca_wave_properties_now['cawave_peak_amplitude_f']
+                                half_decay_time_idx = np.argmax(cawave_f_now_normalized[peak_amplitude_idx:]<.5)+peak_amplitude_idx
+                                ca_wave_properties_now['cawave_half_decay_time'] = cawave_time[half_decay_time_idx]-ca_wave_properties_now['cawave_rise_time']
+                                
                                 calcium_wave_properties_list.append(ca_wave_properties_now)
          #%            
         #with dj.conn().transaction: #inserting one movie
