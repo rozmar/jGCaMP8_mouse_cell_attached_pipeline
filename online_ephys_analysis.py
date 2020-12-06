@@ -1,6 +1,8 @@
+#These scripts are used during the experiment to quickly visualize the quality of the ephys and the tuning of the cell
+#You can also use the datajoint database
+#
 from utils_ephys import extract_tuning_curve
-import _obsolete.utils as utils
-import utils_ephys
+from utils import utils_ephys
 import os
 import numpy as np
 import matplotlib.pyplot as plt
@@ -197,8 +199,8 @@ for stim,ephysfile in zip(stimnums,ephysfiles_real):
                             F_activitiy_conv= np.convolve(F_activity,np.concatenate([np.zeros(decay_step),np.ones(decay_step)]),'same')
                             F_activitiy_conv[:decay_step]=1
                             needed =F_activitiy_conv==0
-                            F_orig_filt = utils.gaussFilter(F_orig,framerate,sigma = F_filter_sigma)
-                            Fneu_orig_filt = utils.gaussFilter(Fneu_orig,framerate,sigma = F_filter_sigma)
+                            F_orig_filt = utils_ephys.gaussFilter(F_orig,framerate,sigma = F_filter_sigma)
+                            Fneu_orig_filt = utils_ephys.gaussFilter(Fneu_orig,framerate,sigma = F_filter_sigma)
                             p=np.polyfit(Fneu_orig_filt[needed],F_orig_filt[needed],1)
                             neu_r = p[0] 
                             if neu_r>1:
@@ -219,16 +221,16 @@ for stim,ephysfile in zip(stimnums,ephysfiles_real):
                         # - ------ calculate r
                         
                         
-                        F = utils.gaussFilter(F,framerate,sigma = F_filter_sigma)
-                        Fneu = utils.gaussFilter(Fneu,framerate,sigma = F_filter_sigma)
+                        F = utils_ephys.gaussFilter(F,framerate,sigma = F_filter_sigma)
+                        Fneu = utils_ephys.gaussFilter(Fneu,framerate,sigma = F_filter_sigma)
                         F_corr = F-Fneu*neu_r
-                        p=np.polyfit(F_corr,utils.gaussFilter(F,framerate,sigma = F_filter_sigma),1)
+                        p=np.polyfit(F_corr,utils_ephys.gaussFilter(F,framerate,sigma = F_filter_sigma),1)
                         F_corr =F_corr +p[1]
                         # correct neuropil fluctuations
                         
                         
-                        F0 = utils.rollingfun(F_corr, window = F0step, func = 'min')
-                        F0 = utils.rollingfun(F0, window = int(F0step*1), func = 'max')
+                        F0 = utils_ephys.rollingfun(F_corr, window = F0step, func = 'min')
+                        F0 = utils_ephys.rollingfun(F0, window = int(F0step*1), func = 'max')
                         dFF = (F_corr-F0)/F0
                         #s2p_metadata = np.load(os.path.join(suite2p_movie_path,'ops.npy')).tolist()
                         #%
