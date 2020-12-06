@@ -23,15 +23,21 @@ homefolder = dj.config['locations.mr_share']
 #%%
 @ray.remote
 def populatemytables_core_paralel(arguments,runround):
-    if runround == 1:
+    if runround == 1:        
         imaging.MoviePowerPostObjective().populate(**arguments)
         imaging_gt.SessionCalciumSensor().populate(**arguments)
         imaging_gt.ROIDwellTime().populate(**arguments)
         imaging_gt.ROINeuropilCorrelation().populate(**arguments)
-        
+        imaging_gt.MovieDepth().populate(**arguments)
         
     elif runround == 2:
+        imaging_gt.SessionROIFDistribution().populate(**arguments)
         imaging_gt.IngestCalciumWave().populate(**arguments)
+        
+    elif runround == 3:
+        imaging_gt.MovieCalciumWaveSNR().populate(**arguments)
+        
+        
 
 def populatemytables_core(arguments,runround):
     if runround == 1:
@@ -39,8 +45,13 @@ def populatemytables_core(arguments,runround):
         imaging_gt.SessionCalciumSensor().populate(**arguments)
         imaging_gt.ROIDwellTime().populate(**arguments)
         imaging_gt.ROINeuropilCorrelation().populate(**arguments)
+        imaging_gt.MovieDepth().populate(**arguments)
+        
     elif runround == 2:
+        imaging_gt.SessionROIFDistribution().populate(**arguments)
         imaging_gt.IngestCalciumWave().populate(**arguments)
+    elif runround == 3:
+        imaging_gt.MovieCalciumWaveSNR().populate(**arguments)
         
 def populatemytables(paralel=True,cores = 9):
     finished = False
