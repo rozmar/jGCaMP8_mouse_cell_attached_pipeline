@@ -48,12 +48,14 @@ def drop_every_schema(schemaname):
     schema = dj.schema(schemaname+'-imaging')
     schema.drop(force=True)
      #%%
-    schema = dj.schema(schemaname+'-ephys-anal')
+    schema = dj.schema(schemaname+'-ephysanal_cell_attached')
     schema.drop(force=True)
     #%%
     schema = dj.schema(schemaname+'-ephys_cell_attached')
     schema.drop(force=True)
-    
+    #%%
+    schema = dj.schema(schemaname+'-ephys_patch')
+    schema.drop(force=True)    
     
     #%%
     schema = dj.schema(schemaname+'-experiment')
