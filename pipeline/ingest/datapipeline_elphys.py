@@ -24,22 +24,12 @@ def populatemytables_core_paralel(arguments,runround):
     elif runround == 2:
         ephysanal_cell_attached.ActionPotential().populate(**arguments)
     elif runround ==3:
+        ephysanal_cell_attached.SweepAPQC().populate(**arguments)
         pass
-        #ephysanal_cell_attached.CellSpikeParameters().populate(**arguments)
-        #ephysanal_cell_attached.IngestAPGroup().populate(**arguments)
+        ephysanal_cell_attached.CellSpikeParameters().populate(**arguments)
+        ephysanal_cell_attached.IngestAPGroup().populate(**arguments)
     elif runround == 4:
         ephysanal_cell_attached.IngestAPGroupTrace().populate(**arguments)
-        
-# =============================================================================
-#     elif runround == 2:
-#         ephysanal.SquarePulseSeriesResistance().populate(**arguments)
-#         ephysanal.SweepSeriesResistance().populate(**arguments)
-#     elif runround == 3:
-#         ephysanal.SweepResponseCorrected().populate(**arguments)
-#     elif runround == 4:
-#         ephysanal.ActionPotential().populate(**arguments)
-#         ephysanal.ActionPotentialDetails().populate(**arguments)
-# =============================================================================
         
 
 def populatemytables_core(arguments,runround):
@@ -49,23 +39,14 @@ def populatemytables_core(arguments,runround):
     elif runround == 2:
         ephysanal_cell_attached.ActionPotential().populate(**arguments)
     elif runround ==3:
+        ephysanal_cell_attached.SweepAPQC().populate(**arguments)
         pass
-        #ephysanal_cell_attached.CellSpikeParameters().populate(**arguments)
-        #ephysanal_cell_attached.IngestAPGroup().populate(**arguments)
+        ephysanal_cell_attached.CellSpikeParameters().populate(**arguments)
+        ephysanal_cell_attached.IngestAPGroup().populate(**arguments)
     elif runround == 4:
         ephysanal_cell_attached.IngestAPGroupTrace().populate(**arguments)
-# =============================================================================
-#     elif runround == 2:
-#         ephysanal.SquarePulseSeriesResistance().populate(**arguments)
-#         ephysanal.SweepSeriesResistance().populate(**arguments)
-#         extrapolate_sweep_series_resistance()
-#     elif runround == 3:
-#         ephysanal.SweepResponseCorrected().populate(**arguments)
-#     elif runround == 4:
-#         ephysanal.ActionPotential().populate(**arguments)
-#         ephysanal.ActionPotentialDetails().populate(**arguments)
-# =============================================================================
-        
+
+    
 def populatemytables(paralel=True,cores = 9):
     finished = False
     while not finished:
