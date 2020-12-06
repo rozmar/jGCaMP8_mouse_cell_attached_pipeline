@@ -59,7 +59,7 @@ for sample_name in sample_names:
             z_positions.append(metadata_sample_row['Z location'])
             fnames.append(os.path.join(path,filename))
             readers.append(lazy_imread(os.path.join(path,filename)))  # doesn't actually read the file
-            if 'center_x' not in metadata_sample.keys() and channel=='RFP':
+            if 'center_x' not in metadata_sample.keys() and (channel=='RFP' or channel == 'FITC'):
                 data = readers[-1].compute()
                 data_filt=ndimage.filters.gaussian_filter(data,filter_sigma)
                 max_value = np.max(data_filt)
@@ -67,7 +67,7 @@ for sample_name in sample_names:
                 max_position_rfp.append(max_position)
                 max_value_rfp.append(max_value)
                 rotation_rfp.append(np.nan)
-            elif channel=='RFP':
+            elif (channel=='RFP' or channel == 'FITC'):#:channel=='RFP':
                 pixel_num_to_cut = 1000
                 max_position =np.asarray([metadata_sample_row['center_x'],metadata_sample_row['center_y']],int)
                 max_position_rfp.append(max_position)
@@ -85,25 +85,61 @@ for sample_name in sample_names:
         metadata_all[sample_name][channel]['fnames']=fnames
         metadata_all[sample_name][channel]['readers']=readers
         metadata_all[sample_name][channel]['readers']=readers
-        if channel=='RFP':
+        if (channel=='RFP' or channel == 'FITC'):#channel=='RFP':
             metadata_all[sample_name][channel]['max_pos']=max_position_rfp
             metadata_all[sample_name][channel]['max_val']=max_value_rfp
             metadata_all[sample_name][channel]['rotation']=rotation_rfp
             
 #%%
+fig = plt.figure()
+ax_rfp = fig.add_subplot(2,1,1)
+ax_fitc = fig.add_subplot(2,1,2)
 channel='RFP'
-
-
+idxs = list()
+samples_used = list()
 for sample_name in sample_names:
+    if 'xcamp' in sample_name.lower():
+        color = 'orange'
+    elif '7f' in sample_name.lower():
+        color = 'green'
+    elif '456' in sample_name.lower():
+        color = 'blue'
+    color
+    if '20x' in sample_name:
+        continue
+    print(sample_name)
     #%
     z_positions = metadata_all[sample_name][channel]['z_positions']
     max_value_rfp = metadata_all[sample_name][channel]['max_val']
     #%
-    plt.plot(z_positions,max_value_rfp,label = sample_name)
-plt.xlabel('distance along rostrocaudal axis (microns)')
-plt.ylabel('intensity on anti-GFP channel (AU)')
-plt.legend()               
+    max_idx = np.argmax(max_value_rfp)
+    samples_used.append(sample_name)
+    idxs.append(max_idx)
+    ax_rfp.plot(np.asarray(z_positions) - z_positions[max_idx],max_value_rfp,label = sample_name,color = color)
+ax_rfp.set_xlabel('distance along rostrocaudal axis (microns)')
+ax_rfp.set_ylabel('intensity on anti-GFP channel (AU)')
+ax_rfp.legend()               
 
+channel='FITC'
+for sample_name,max_idx in zip(samples_used,idxs):
+    if 'xcamp' in sample_name.lower():
+        color = 'orange'
+    elif '7f' in sample_name.lower():
+        color = 'green'
+    elif '456' in sample_name.lower():
+        color = 'blue'
+    color
+    if '20x' in sample_name:
+        continue
+    print(sample_name)
+    #%
+    z_positions = metadata_all[sample_name][channel]['z_positions']
+    max_value_rfp = metadata_all[sample_name][channel]['max_val']
+    #%
+    ax_fitc.plot(np.asarray(z_positions) - z_positions[max_idx],max_value_rfp,label = sample_name,color = color)
+ax_fitc.set_xlabel('distance along rostrocaudal axis (microns)')
+ax_fitc.set_ylabel('intensity on native GFP channel (AU)')
+ax_fitc.legend()   
 #%%
 import math
 def rotate_rectangle(origin, points, angle):
