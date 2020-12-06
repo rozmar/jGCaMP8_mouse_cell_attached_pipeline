@@ -1,4 +1,5 @@
 from matplotlib.lines import Line2D
+import seaborn as sns
 import matplotlib.pyplot as plt
 import numpy as np
 import utils.utils_plot as utils_plot
@@ -6,6 +7,225 @@ import datajoint as dj
 dj.conn()
 from pipeline import pipeline_tools,lab, experiment, ephys_cell_attached,ephysanal_cell_attached, imaging, imaging_gt
 #%%
+
+
+def plot_ap_scatter_with_ophys_prop(ca_waves_dict,plot_parameters):
+    #%%
+    x_list = list()
+    y_list = list()
+    z_list = list()
+    x_per_sensor = dict()
+    y_per_sensor = dict()
+    z_per_sensor = dict()
+    for sensor in plot_parameters['sensors']:
+        x_per_sensor[sensor] = list()
+        y_per_sensor[sensor] = list()
+        z_per_sensor[sensor] = list()
+        for cell in ca_waves_dict[sensor]:
+            idx = cell['ap_group_ap_num_mean_per_ap'] == plot_parameters['ap_num_to_plot']
+            x = np.mean(cell[plot_parameters['x_parameter']])
+            y = np.mean(cell[plot_parameters['y_parameter']])
+            z = cell[plot_parameters['z_parameter']][idx]
+            
+            x_list.append(x)
+            y_list.append(y)
+            z_list.extend(z)
+            
+            x_per_sensor[sensor].append(x)
+            y_per_sensor[sensor].append(y)
+            z_per_sensor[sensor].extend(z)
+    x_list = np.asarray(x_list)       
+    y_list = np.asarray(y_list)       
+    z_list = np.asarray(z_list)    
+    
+    z_edges = np.percentile(z_list,plot_parameters['z_parameter_percentiles'])
+    ms_edges = plot_parameters['markersize_edges']
+    fig_ephys_scatter = plt.figure()
+    ax_ephys_scatter =     fig_ephys_scatter.add_subplot(1,1,1)
+    for sensor in plot_parameters['sensors']:
+        if plot_parameters['normalize z by sensor']:
+            z_edges = np.percentile(z_per_sensor[sensor],plot_parameters['z_parameter_percentiles'])
+        for x,y,z in zip(x_per_sensor[sensor],y_per_sensor[sensor],z_per_sensor[sensor]):
+            if z<z_edges[0]:
+                z = z_edges[0]
+            elif z>z_edges[1]:
+                z = z_edges[1]
+            ms = (z-z_edges[0])/np.diff(z_edges)*ms_edges[1]+ms_edges[0]
+            if plot_parameters['invert y axis']:
+                if y<.01:
+                    y=.01
+                #y[y<.001] = .001
+                ax_ephys_scatter.semilogy(x,1/y,'o',color = plot_parameters['sensor_colors'][sensor],markersize = ms,alpha = plot_parameters['alpha'])
+            else:
+                ax_ephys_scatter.plot(x,y,'o',color = plot_parameters['sensor_colors'][sensor],markersize = ms,alpha = plot_parameters['alpha'])
+    #ax_ephys_scatter.plot(x_list,y_list,'ko')
+    legend_elements = list()
+    for sensor in plot_parameters['sensors']:
+        legend_elements.append(Line2D([0], [0], marker='o', color=plot_parameters['sensor_colors'][sensor], 
+                                      label=sensor,markerfacecolor=plot_parameters['sensor_colors'][sensor], markersize=8))
+    ax_ephys_scatter.legend(handles=legend_elements)     
+    ax_ephys_scatter.set_xlabel(plot_parameters['x_parameter'])
+    ax_ephys_scatter.set_ylabel(plot_parameters['y_parameter'])
+    ax_ephys_scatter.set_title(plot_parameters['z_parameter'])
+    #%%
+def plot_number_of_rois():
+    session_roi_nums_dict = dict()
+    movie_roi_nums_dict = dict()
+    for sensor_i,sensor in enumerate(sensors):
+        session_roi_nums_dict[sensor]=list()
+        movie_roi_nums_dict[sensor]=list()
+        sessions = imaging_gt.SessionCalciumSensor()&'session_calcium_sensor = "{}"'.format(sensor)
+        for session in sessions:
+            session_roi_nums_dict[sensor].append(len(imaging.ROI()*imaging_gt.SessionCalciumSensor()&session))
+            movies = imaging.Movie()&session
+            for movie in movies:
+                movie_roi_nums_dict[sensor].append(len(imaging.ROI()*imaging_gt.SessionCalciumSensor()&movie))
+    #%  ROI number in movies, etc         
+    fig_roi_num = plt.figure(figsize = [25,10])
+    ax_roi_num = fig_roi_num.add_subplot(1,2,1)
+    ax_roi_num_per_subject = ax_roi_num.twinx() 
+    x_roinum_swarm_list = list()
+    y_roinum_swarm_list = list()
+    
+    ax_movie_num = fig_roi_num.add_subplot(1,2,2)
+    ax_roi_num_per_movie = ax_movie_num.twinx() 
+    x_roinum_swarm__movie_list = list()
+    y_roinum_swarm__movie_list = list()
+    for sensor_i,sensor in enumerate(sensors):
+        ax_roi_num.bar(sensor_i,sum(session_roi_nums_dict[sensor]),edgecolor = sensor_colors[sensor],fill=False,linewidth = 2)
+        x_roinum_swarm_list.append(np.ones(len(session_roi_nums_dict[sensor]))*sensor_i)
+        y_roinum_swarm_list.append(session_roi_nums_dict[sensor])
+        
+        ax_movie_num.bar(sensor_i,sum(movie_roi_nums_dict[sensor]),edgecolor = sensor_colors[sensor],fill=False,linewidth = 2)
+        x_roinum_swarm__movie_list.append(np.ones(len(movie_roi_nums_dict[sensor]))*sensor_i)
+        y_roinum_swarm__movie_list.append(movie_roi_nums_dict[sensor])
+        
+    sns.swarmplot(x =np.concatenate(x_roinum_swarm_list),y = np.concatenate(y_roinum_swarm_list),color='black',ax = ax_roi_num_per_subject)     
+    sns.swarmplot(x =np.concatenate(x_roinum_swarm__movie_list),y = np.concatenate(y_roinum_swarm__movie_list),color='black',ax = ax_roi_num_per_movie,size = 2)     
+    
+    ax_roi_num.set_xticks(np.arange(len(sensors)))
+    ax_roi_num.set_xticklabels(sensors)  
+    ax_roi_num.set_ylabel('Total number of ROIs')
+    ax_roi_num_per_subject.set_ylabel('Number of ROIs per subject')
+    ax_roi_num_per_subject.set_ylim([0,ax_roi_num_per_subject.get_ylim()[1]])
+    
+    ax_movie_num.set_xticks(np.arange(len(sensors)))
+    ax_movie_num.set_xticklabels(sensors)  
+    ax_movie_num.set_ylabel('Total number of ROIs')
+    ax_roi_num_per_movie.set_ylabel('Number of ROIs per movie')
+    ax_roi_num_per_movie.set_ylim([0,ax_roi_num_per_movie.get_ylim()[1]])
+    
+def plot_stats(plot_properties):
+    fig_exptime_movielen = plt.figure()
+    ax_exptime_movielen = fig_exptime_movielen.add_subplot(1,1,1)
+    fig_stats = plt.figure(figsize = [25,10])
+    ax_subject_num = fig_stats.add_subplot(2,2,1)
+    ax_subject_expression_time = ax_subject_num.twinx()
+    ax_cell_num = fig_stats.add_subplot(2,2,2)
+    ax_cell_num_per_subject = ax_cell_num.twinx()
+    ax_movie_lengths_with_gt = fig_stats.add_subplot(2,2,3)
+    ax_movie_lengths_with_gt_per_scell = ax_movie_lengths_with_gt.twinx()
+    ax_ap_number = fig_stats.add_subplot(2,2,4)
+    ax_ap_number_per_cell = ax_ap_number.twinx()
+    linewidth = 3
+    markersize = 4
+    alpha = .2
+    swarm_apnum_x = list()
+    swarm_apnum_y = list()
+    swarm_movielen_x = list()
+    swarm_movielen_y = list()
+    swarm_cellnum_x = list()
+    swarm_cellnum_y = list()
+    swarm_exptime_x = list()
+    swarm_exptime_y = list()
+    for sensor_i,sensor in enumerate(plot_properties['sensors']):
+        sensor_filter = 'session_calcium_sensor = "{}"'.format(sensor)
+        expression_time_filter = 'session_sensor_expression_time < {}'.format(plot_properties['max_expression_time'])
+        sessions = lab.Subject()*imaging_gt.SessionCalciumSensor() & sensor_filter & expression_time_filter# sessions = subjects
+        cells = ephys_cell_attached.Cell()*imaging_gt.SessionCalciumSensor() & sensor_filter & expression_time_filter
+        #movies = imaging.Movie()*imaging_gt.SessionCalciumSensor() & sensor_filter & expression_time_filter
+        movies_with_gt_roi = imaging.Movie()*imaging_gt.SessionCalciumSensor()*imaging_gt.ROISweepCorrespondance() & sensor_filter & expression_time_filter
+        action_potentials = ephysanal_cell_attached.ActionPotential()*imaging_gt.SessionCalciumSensor()*imaging_gt.ROISweepCorrespondance() & sensor_filter & expression_time_filter
+        cells_per_subject = list()
+        for session in sessions:
+            cells_per_subject.append(len(np.unique((imaging_gt.ROISweepCorrespondance()&session).fetch('cell_number'))))#len(cells&session)
+        
+        movie_lengths_per_cell_with_gt_roi = list()
+        ap_number_per_cell = list()
+        expression_time_per_cell = list()
+        cell_num = 0
+        for cell in cells:
+            if len(movies_with_gt_roi&cell) > 0:
+                cell_num += 1
+                movie_frame_rates,movie_frame_nums,expression_times = (movies_with_gt_roi&cell).fetch('movie_frame_rate','movie_frame_num','session_sensor_expression_time')
+                movie_lengths_per_cell_with_gt_roi.append(np.sum(movie_frame_nums/movie_frame_rates))
+                expression_time_per_cell.append(np.mean(expression_times))
+                ap_number_per_cell.append(len(action_potentials&cell))
+    
+        movie_lengths_per_cell_with_gt_roi = np.asarray(movie_lengths_per_cell_with_gt_roi)
+        
+        ax_exptime_movielen.plot(expression_time_per_cell,movie_lengths_per_cell_with_gt_roi/60,'o',color = plot_properties['sensor_colors'][sensor],markersize = markersize,alpha=alpha)
+        
+    
+        subject_num = len(sessions) # subject = sessions because it's a terminal experiment
+        expression_time = sessions.fetch('session_sensor_expression_time')
+        ax_subject_num.bar(sensor_i,subject_num,edgecolor = plot_properties['sensor_colors'][sensor],fill=False,linewidth = linewidth)
+        #ax_subject_expression_time.plot(np.ones(subject_num)*sensor_i,expression_time,'o',color = plot_properties['sensor_colors'][sensor],markersize = markersize,alpha=alpha)
+        swarm_exptime_x.append(np.ones(len(expression_time))*sensor_i)
+        swarm_exptime_y.append(expression_time)
+        
+        #cell_num = len(cells)
+        ax_cell_num.bar(sensor_i,cell_num,edgecolor = plot_properties['sensor_colors'][sensor],fill=False,linewidth = linewidth)
+        #ax_cell_num_per_subject.plot(np.ones(subject_num)*sensor_i,cells_per_subject,'o',color = plot_properties['sensor_colors'][sensor],markersize = markersize,alpha=alpha)
+        swarm_cellnum_x.append(np.ones(len(cells_per_subject))*sensor_i)
+        swarm_cellnum_y.append(cells_per_subject)
+        
+        
+        ax_movie_lengths_with_gt.bar(sensor_i,np.sum(movie_lengths_per_cell_with_gt_roi)/3600,edgecolor = plot_properties['sensor_colors'][sensor],fill=False,linewidth = linewidth)
+        #ax_movie_lengths_with_gt_per_scell.plot(np.ones(cell_num)*sensor_i,movie_lengths_per_cell_with_gt_roi/60,'o',color = plot_properties['sensor_colors'][sensor],markersize = markersize,alpha=alpha)
+        swarm_movielen_x.append(np.ones(len(movie_lengths_per_cell_with_gt_roi))*sensor_i)
+        swarm_movielen_y.append(movie_lengths_per_cell_with_gt_roi/60)
+        
+        ax_ap_number.bar(sensor_i,np.sum(ap_number_per_cell)/1000,edgecolor = plot_properties['sensor_colors'][sensor],fill=False,linewidth = linewidth)
+        swarm_apnum_x.append(np.ones(len(ap_number_per_cell))*sensor_i)
+        swarm_apnum_y.append(ap_number_per_cell)
+        #ax_ap_number_per_cell.plot(np.ones(cell_num)*sensor_i,ap_number_per_cell,'o',color = plot_properties['sensor_colors'][sensor],markersize = markersize,alpha=alpha)
+        #sns.swarmplot(x =np.ones(cell_num)*sensor_i,y =ap_number_per_cell ,color=plot_properties['sensor_colors'][sensor],ax = ax_ap_number_per_cell)
+        #break
+        #break
+    #%
+    sns.swarmplot(x =np.concatenate(swarm_exptime_x),y =np.concatenate(swarm_exptime_y) ,color='black',ax = ax_subject_expression_time)  
+    sns.swarmplot(x =np.concatenate(swarm_cellnum_x),y =np.concatenate(swarm_cellnum_y) ,color='black',ax = ax_cell_num_per_subject)  
+    sns.swarmplot(x =np.concatenate(swarm_movielen_x),y =np.concatenate(swarm_movielen_y) ,color='black',ax = ax_movie_lengths_with_gt_per_scell)  
+    ax_ap_number_per_cell.set_yscale('log')
+    sns.swarmplot(x =np.concatenate(swarm_apnum_x),y =np.concatenate(swarm_apnum_y) ,color='black',ax = ax_ap_number_per_cell)  
+    #%
+    ax_subject_num.set_xticks(np.arange(len(plot_properties['sensors'])))
+    ax_subject_num.set_xticklabels(plot_properties['sensors'])
+    ax_subject_num.set_ylabel('Number of mice for each sensor')
+    ax_subject_expression_time.set_ylabel('Expression time (days)')
+    
+    ax_cell_num.set_xticks(np.arange(len(plot_properties['sensors'])))
+    ax_cell_num.set_xticklabels(plot_properties['sensors'])
+    ax_cell_num.set_ylabel('Number of cells for each sensor')
+    ax_cell_num_per_subject.set_ylabel('Cell number in each mouse')
+    
+    ax_movie_lengths_with_gt.set_xticks(np.arange(len(plot_properties['sensors'])))
+    ax_movie_lengths_with_gt.set_xticklabels(plot_properties['sensors'])
+    ax_movie_lengths_with_gt.set_ylabel('Total length of movies with segmented ROI (hr)')
+    ax_movie_lengths_with_gt_per_scell.set_ylabel('Length of movies per cell with segmented ROI (min)')
+    ax_movie_lengths_with_gt_per_scell.set_ylim([0,ax_movie_lengths_with_gt_per_scell.get_ylim()[1]])
+    
+    
+    ax_ap_number.set_xticks(np.arange(len(plot_properties['sensors'])))
+    ax_ap_number.set_xticklabels(plot_properties['sensors'])
+    ax_ap_number.set_ylabel('Total number of APs (x1000)')
+    ax_ap_number_per_cell.set_ylabel('Number of APs per cell')
+    
+    ax_exptime_movielen.set_xlabel('expression time (days)')
+    ax_exptime_movielen.set_ylabel('Length of movies per cell with segmented ROI (min)')
+
+
 def ca_wave_properties_scatter_onpick(event):
     axesdata = event.canvas.axes_dict
     data = axesdata['data_dict']
@@ -186,6 +406,7 @@ def ca_wave_properties_scatter_onpick(event):
     #%%
 def scatter_plot_all_event_properties(ca_waves_dict,ca_wave_parameters,plot_parameters):
     #%%
+    correct_f0_with_power_depth = plot_parameters['correct_f0_with_power_depth']
     alpha = plot_parameters['scatter_plot_alpha']
     sensor_colors=plot_parameters['sensor_colors']
     key= {'neuropil_number': ca_wave_parameters['neuropil_number'],
@@ -208,7 +429,8 @@ def scatter_plot_all_event_properties(ca_waves_dict,ca_wave_parameters,plot_para
     axes_dict['ax_1ap_f_amplitude_cell'] = fig.add_subplot(4,4,3,sharex = axes_dict['ax_1ap_snr_amplitude_cell'])
     axes_dict['ax_1ap_f0_cell'] = fig.add_subplot(4,4,5,sharex = axes_dict['ax_1ap_snr_amplitude_cell'])
     
-    axes_dict['ax_1ap_baseline_noise_cell'] = fig.add_subplot(4,4,6,sharex = axes_dict['ax_1ap_snr_amplitude_cell'])
+    #axes_dict['ax_1ap_baseline_noise_cell'] = fig.add_subplot(4,4,6,sharex = axes_dict['ax_1ap_snr_amplitude_cell'])
+    axes_dict['ax_f0_percentile_cell'] = fig.add_subplot(4,4,6,sharex = axes_dict['ax_1ap_snr_amplitude_cell'])
     axes_dict['ax_pixel_num_cell'] = fig.add_subplot(4,4,7,sharex = axes_dict['ax_1ap_snr_amplitude_cell'])
     axes_dict['ax_movie_power'] = fig.add_subplot(4,4,9,sharex = axes_dict['ax_1ap_snr_amplitude_cell'])
     axes_dict['ax_cell_depth'] = fig.add_subplot(4,4,10,sharex = axes_dict['ax_1ap_snr_amplitude_cell'])
@@ -233,10 +455,14 @@ def scatter_plot_all_event_properties(ca_waves_dict,ca_wave_parameters,plot_para
     axes_dict['ax_1ap_dff_amplitude_cell'].set_title(ca_wave_parameters)
     axes_dict['ax_pixel_num_cell'].set_ylabel('ROI pixel number')
     axes_dict['ax_1ap_dff_amplitude_cell'].set_ylabel('peak amplitude (dF/F)')
-    axes_dict['ax_1ap_f0_cell'].set_ylabel('baseline fluorescence (F)')
+    if correct_f0_with_power_depth:
+        axes_dict['ax_1ap_f0_cell'].set_ylabel('baseline fluorescence (F) - corrected**')
+    else:
+        axes_dict['ax_1ap_f0_cell'].set_ylabel('baseline fluorescence (F)')
     axes_dict['ax_1ap_f_amplitude_cell'].set_ylabel('peak amplitude (F)')
     axes_dict['ax_1ap_snr_amplitude_cell'].set_ylabel('peak amplitude SNR')
-    axes_dict['ax_1ap_baseline_noise_cell'].set_ylabel('baseline noise (std(F))')
+    #axes_dict['ax_1ap_baseline_noise_cell'].set_ylabel('baseline noise (std(F))')
+    axes_dict['ax_f0_percentile_cell'].set_ylabel('percentile of F0 in session')
     axes_dict['ax_1ap_baseline_f_vs_noise_cell'] = fig.add_subplot(4,4,13)
     axes_dict['ax_1ap_baseline_f_vs_noise_cell'].set_xlabel('baseline fluorescence (F)')
     axes_dict['ax_1ap_baseline_f_vs_noise_cell'].set_ylabel('baseline noise (std(F))')
@@ -305,7 +531,17 @@ def scatter_plot_all_event_properties(ca_waves_dict,ca_wave_parameters,plot_para
             axes_dict['ax_1ap_f_amplitude_cell'].plot(x,y,'o',ms=plot_parameters['scatter_marker_size'],color = sensor_colors[sensor],alpha = alpha)
             data_dict['ax_1ap_f_amplitude_cell_x'].append(x)
             data_dict['ax_1ap_f_amplitude_cell_y'].append(y)
-            y = cell_data['cawave_baseline_f'][cell_data['ap_group_ap_num']==plot_parameters['ap_num_to_plot']]
+
+            if correct_f0_with_power_depth:
+# =============================================================================
+#                 f = cell_data['cawave_baseline_f'][cell_data['ap_group_ap_num']==plot_parameters['ap_num_to_plot']]
+#                 power =  cell_data['movie_power'][cell_data['ap_group_ap_num']==plot_parameters['ap_num_to_plot']]
+#                 depth = cell_data['movie_hmotors_sample_z'][cell_data['ap_group_ap_num']==plot_parameters['ap_num_to_plot']]
+#                 y =f/(power**2)*depth**2
+# =============================================================================
+                y = cell_data['roi_f0_percentile_value'][cell_data['ap_group_ap_num']==plot_parameters['ap_num_to_plot']]
+            else:
+                y = cell_data['cawave_baseline_f'][cell_data['ap_group_ap_num']==plot_parameters['ap_num_to_plot']]
             axes_dict['ax_1ap_f0_cell'].semilogy(x,y,'o',ms=plot_parameters['scatter_marker_size'],color = sensor_colors[sensor],alpha = alpha)
             data_dict['ax_1ap_f0_cell_x'].append(x)
             data_dict['ax_1ap_f0_cell_y'].append(y)
@@ -313,10 +549,16 @@ def scatter_plot_all_event_properties(ca_waves_dict,ca_wave_parameters,plot_para
             axes_dict['ax_1ap_snr_amplitude_cell'].plot(x,y,'o',ms=plot_parameters['scatter_marker_size'],color = sensor_colors[sensor],alpha = alpha)
             data_dict['ax_1ap_snr_amplitude_cell_x'].append(x)
             data_dict['ax_1ap_snr_amplitude_cell_y'].append(y)
-            y = cell_data['cawave_baseline_f_std'][cell_data['ap_group_ap_num']==plot_parameters['ap_num_to_plot']]
-            axes_dict['ax_1ap_baseline_noise_cell'].semilogy(x,y,'o',ms=plot_parameters['scatter_marker_size'],color = sensor_colors[sensor],alpha = alpha)
-            data_dict['ax_1ap_baseline_noise_cell_x'].append(x)
-            data_dict['ax_1ap_baseline_noise_cell_y'].append(y)
+# =============================================================================
+#             y = cell_data['cawave_baseline_f_std'][cell_data['ap_group_ap_num']==plot_parameters['ap_num_to_plot']]
+#             axes_dict['ax_1ap_baseline_noise_cell'].semilogy(x,y,'o',ms=plot_parameters['scatter_marker_size'],color = sensor_colors[sensor],alpha = alpha)
+#             data_dict['ax_1ap_baseline_noise_cell_x'].append(x)
+#             data_dict['ax_1ap_baseline_noise_cell_y'].append(y)
+# =============================================================================
+            y = cell_data['roi_f0_percentile'][cell_data['ap_group_ap_num']==plot_parameters['ap_num_to_plot']]
+            axes_dict['ax_f0_percentile_cell'].plot(x,y,'o',ms=plot_parameters['scatter_marker_size'],color = sensor_colors[sensor],alpha = alpha)
+            data_dict['ax_f0_percentile_cell_x'].append(x)
+            data_dict['ax_f0_percentile_cell_y'].append(y)
             y = cell_data['roi_pixel_num'][cell_data['ap_group_ap_num']==plot_parameters['ap_num_to_plot']]
             axes_dict['ax_pixel_num_cell'].semilogy(x,y,'o',ms=plot_parameters['scatter_marker_size'],color = sensor_colors[sensor],alpha = alpha)##roi_dwell_time_multiplier
             data_dict['ax_pixel_num_cell_x'].append(x)
@@ -445,6 +687,9 @@ def plot_all_traces(ca_traces_dict,ca_traces_dict_by_cell,ca_wave_parameters,plo
         #x,y = utils_plot.generate_superresolution_trace(np.concatenate(ca_traces_dict[sensor]['cawave_time_list']),np.concatenate(ca_traces_dict[sensor]['cawave_f_corr_list']),plot_parameters['bin_step'],plot_parameters['bin_size'],function = 'mean')
         x_conc = np.concatenate(ca_traces_dict[sensor]['cawave_time_list'])
         y_conc= np.concatenate(ca_traces_dict[sensor]['cawave_f_corr_list'])
+        needed_idx = (x_conc>=plot_parameters['start_time']-plot_parameters['bin_size'])&(x_conc<=plot_parameters['end_time']+plot_parameters['bin_size'])
+        x_conc = x_conc[needed_idx]
+        y_conc = y_conc[needed_idx]
         trace_dict = utils_plot.generate_superresolution_trace(x_conc,y_conc,plot_parameters['bin_step'],plot_parameters['bin_size'],function = 'all') 
         x = np.asarray(trace_dict['bin_centers'])
         y = np.asarray(trace_dict['trace_mean'])
@@ -465,6 +710,9 @@ def plot_all_traces(ca_traces_dict,ca_traces_dict_by_cell,ca_wave_parameters,plo
         
         x_conc = np.concatenate(ca_traces_dict[sensor]['cawave_time_list'])
         y_conc= np.concatenate(ca_traces_dict[sensor]['cawave_dff_list'])
+        needed_idx = (x_conc>=plot_parameters['start_time']-plot_parameters['bin_size'])&(x_conc<=plot_parameters['end_time']+plot_parameters['bin_size'])
+        x_conc = x_conc[needed_idx]
+        y_conc = y_conc[needed_idx]
         trace_dict = utils_plot.generate_superresolution_trace(x_conc,y_conc,plot_parameters['bin_step'],plot_parameters['bin_size'],function = 'all') 
         x = np.asarray(trace_dict['bin_centers'])
         y = np.asarray(trace_dict['trace_mean'])
@@ -483,12 +731,24 @@ def plot_all_traces(ca_traces_dict,ca_traces_dict_by_cell,ca_wave_parameters,plo
         #uniquelens = np.unique(ca_traces_dict[sensor]['cawave_lengths'])
         for cell in ca_traces_dict_by_cell[sensor]:
             if len(cell['cawave_time_list'])>=plot_parameters['min_ap_per_apnum']:
-                x,y = utils_plot.generate_superresolution_trace(np.concatenate(cell['cawave_time_list']),np.concatenate(cell['cawave_f_corr_list']),plot_parameters['bin_step_for_cells'],plot_parameters['bin_size_for_cells'],function = 'mean')
+                x_conc_cell = np.concatenate(cell['cawave_time_list'])
+                y_conc_cell = np.concatenate(cell['cawave_f_corr_list'])
+                needed_idx = (x_conc_cell>=plot_parameters['start_time']-plot_parameters['bin_size'])&(x_conc_cell<=plot_parameters['end_time']+plot_parameters['bin_size'])
+                x_conc_cell = x_conc_cell[needed_idx]
+                y_conc_cell = y_conc_cell[needed_idx]
+                x,y = utils_plot.generate_superresolution_trace(x_conc_cell,y_conc_cell,plot_parameters['bin_step_for_cells'],plot_parameters['bin_size_for_cells'],function = 'mean')
                 if not plot_parameters['normalize_raw_trace_offset']:
                     y = y+np.mean(cell['cawave_f0_list'])
                 trace_axes['{}_f_corr_cell'.format(sensor)].plot(x,y,'-',color = plot_parameters['sensor_colors'][sensor],alpha = .1)
                 
-                x,y = utils_plot.generate_superresolution_trace(np.concatenate(cell['cawave_time_list']),np.concatenate(cell['cawave_dff_list']),plot_parameters['bin_step_for_cells'],plot_parameters['bin_size_for_cells'],function = 'mean')
+                x_conc_cell = np.concatenate(cell['cawave_time_list'])
+                y_conc_cell = np.concatenate(cell['cawave_dff_list'])
+                needed_idx = (x_conc_cell>=plot_parameters['start_time']-plot_parameters['bin_size'])&(x_conc_cell<=plot_parameters['end_time']+plot_parameters['bin_size'])
+                x_conc_cell = x_conc_cell[needed_idx]
+                y_conc_cell = y_conc_cell[needed_idx]
+                
+                
+                x,y = utils_plot.generate_superresolution_trace(x_conc_cell,y_conc_cell,plot_parameters['bin_step_for_cells'],plot_parameters['bin_size_for_cells'],function = 'mean')
                 trace_axes['{}_dff_cell'.format(sensor)].plot(x,y,'-',color = plot_parameters['sensor_colors'][sensor],alpha = .1)
                 
         if sensor_i==len(ca_wave_parameters['sensors'])-1:
