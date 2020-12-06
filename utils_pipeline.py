@@ -6,6 +6,7 @@ import numpy as np
 from suite2p import default_ops as s2p_default_ops
 from suite2p import run_s2p
 from suite2p import classification
+from suite2p.detection.masks import create_neuropil_masks, create_cell_pix
 import shutil
 import time
 import datetime
@@ -268,8 +269,116 @@ def batch_run_suite2p(s2p_params):
                             shutil.move(os.path.join(savedir,uniquebasename,'suite2p',plane,rawfile),os.path.join(savedir,uniquebasename,plane,rawfile))
                     os.rmdir(os.path.join(ops['data_path'][0],'suite2p'))
                     
+#%%
+def suite2p_extract_altered_neuropil(s2p_params,neuropil_pixel_nums = [4,8,16]):
+    #%
+    
+    sessions = os.listdir(s2p_params['basedir_out'])
+    sessions.sort()
+    for session in sessions:
+        session_dir = os.path.join(s2p_params['basedir_out'],session)
+        if not os.path.isdir(session_dir):
+            continue
+        
+        cells = os.listdir(session_dir)
+        for cell in cells:
+            cell_dir = os.path.join(session_dir,cell)
+            movies = os.listdir(cell_dir)
+            for movie in movies:
+                t0 = time.time()
+                movie_dir = os.path.join(cell_dir,movie,'plane0')
+                print('extracting roi from {}'.format(movie_dir))
+                try:
+                    iscell = np.load(os.path.join(movie_dir,'iscell.npy'))
+                    roi_stat = list(np.load(os.path.join(movie_dir,'stat.npy'),allow_pickle=True))
+                    reg_metadata = np.load(os.path.join(movie_dir,'ops.npy'),allow_pickle = True).tolist()
+                except:
+                    print('missing or corrupt suite2p files, skipping {}'.format(movie))
+                    continue
+                cell_indices = np.where(iscell[:,0])[0]
+                cell_pix = create_cell_pix(roi_stat, Ly=reg_metadata['Ly'], Lx=reg_metadata['Lx'], allow_overlap=reg_metadata['allow_overlap'])
+                #%
+                neuropil_masks_dict = dict()
+                neuropil_mask = create_neuropil_masks(ypixs=[stat['ypix'] for stat in roi_stat],
+                                                      xpixs=[stat['xpix'] for stat in roi_stat],
+                                                      cell_pix=cell_pix,
+                                                      inner_neuropil_radius=reg_metadata['inner_neuropil_radius'],
+                                                      min_neuropil_pixels=reg_metadata['min_neuropil_pixels'])
+                original_neuropil_mask = neuropil_mask.reshape(len(roi_stat),reg_metadata['Ly'],reg_metadata['Lx'])
+                maskindices=list()
+                for i in range(original_neuropil_mask.shape[0]):
+                    maskindices.append(np.where(original_neuropil_mask[i,:,:]))#)
+                neuropil_masks_dict['neuropil_masks_original']=maskindices    #%%
+                neuropil_masks = list()
+                nimgbatch = min(reg_metadata['batch_size'], 1000)
+                nframes = int(reg_metadata['nframes'])
+                Ly = reg_metadata['Ly']
+                Lx = reg_metadata['Lx']
+                ncells = neuropil_mask.shape[0]
+                
+                
+                for neuropil_pixel_num in neuropil_pixel_nums:
+                    neuropil_mask = create_neuropil_masks(ypixs=[stat['ypix'] for stat in roi_stat],
+                                                      xpixs=[stat['xpix'] for stat in roi_stat],
+                                                      cell_pix=cell_pix,
+                                                      inner_neuropil_radius=neuropil_pixel_num,
+                                                      min_neuropil_pixels=reg_metadata['min_neuropil_pixels'])
+                    neuropil_masks.append(neuropil_mask)
+                    neuropil_mask_now = neuropil_mask.reshape(len(roi_stat),reg_metadata['Ly'],reg_metadata['Lx'])
+                    maskindices=list()
+                    for i in range(neuropil_mask_now.shape[0]):
+                        maskindices.append(np.where(neuropil_mask_now[i,:,:]))#)
+                    neuropil_masks_dict['neuropil_masks_min_neuropil_pixels_{}'.format(neuropil_pixel_num)]=maskindices    #%%
+                
+                np.save(os.path.join(movie_dir,'neuropil_masks.npy'),neuropil_masks_dict)
+                
+                
+                for channel in [1,2]:
+                    if channel == 1:
+                        reg_file = open(os.path.join(movie_dir,'data.bin'), 'rb')
+                    else:
+                        reg_file = open(os.path.join(movie_dir,'data_chan2.bin'), 'rb')
+                    for neuropil_pixel_num,neuropil_mask in zip(neuropil_pixel_nums,neuropil_masks):
+                        Fneu = np.zeros((ncells, nframes),np.float32)
+                        nimgbatch = int(nimgbatch)
+                        block_size = Ly*Lx*nimgbatch*2
+                        ix = 0
+                        data = 1
                     
-                    
+                        while data is not None:
+                            buff = reg_file.read(block_size)
+                            data = np.frombuffer(buff, dtype=np.int16, offset=0)
+                            nimg = int(np.floor(data.size / (Ly*Lx)))
+                            if nimg == 0:
+                                break
+                            data = np.reshape(data, (-1, Ly, Lx))
+                            inds = ix+np.arange(0,nimg,1,int)
+                            data = np.reshape(data, (nimg,-1))
+                            Fneu[:,inds] = np.dot(neuropil_mask , data.T)
+                            ix += nimg
+                        if channel == 1:
+                            np.save(os.path.join(movie_dir,'Fneu_min_neuropil_pixels_{}.npy'.format(neuropil_pixel_num)),Fneu)
+                        else:
+                            np.save(os.path.join(movie_dir,'Fneu_chan2_min_neuropil_pixels_{}.npy'.format(neuropil_pixel_num)),Fneu)
+                    reg_file.close()
+                print('Extracted fluorescence from %d ROIs in %d frames, %0.2f sec.'%(ncells, reg_metadata['nframes']*6, time.time()-t0))
+                    #%%
+# =============================================================================
+#                     break
+#                     
+#                 #%%
+#                 
+#                 if len(cell_indices) <2:
+#                     continue
+#                 break
+#             if len(cell_indices) <2:
+#                 continue
+#             break
+#         if len(cell_indices) <2:
+#             continue
+#         break
+# =============================================================================
+    
                     
                     
 #%% copy  iscell.npys
