@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import datajoint as dj
 dj.conn()
-from pipeline import pipeline_tools,lab, experiment, ephys_cell_attached,ephysanal_cell_attached
+from pipeline import pipeline_tools,lab, experiment, ephys_cell_attached,ephysanal_cell_attached, imaging_gt
 import copy
 import umap
 from scipy.cluster.hierarchy import dendrogram, linkage
@@ -11,7 +11,104 @@ from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE  
 import pandas as pd
 from scipy import stats, interpolate
+from utils import utils_ephys
 #%%
+def ap_hw_snr_distribution_plot(filters):
+    example_ap_group_key  = {'subject_id':471991,
+                             'session':1,
+                             'cell_number':1,
+                             'sweep_number':0,
+                             'ap_group_number':15}
+    ap_baseline_length = 1 #ms
+    binnum = 500
+    
+    
+    hws,snr_dvs,snr_vs,fws = (ephysanal_cell_attached.ActionPotential()*imaging_gt.ROISweepCorrespondance()*ephysanal_cell_attached.SweepAPQC()&filters['snr_filter_sweep']&filters['hw_filter_sweep']).fetch('ap_halfwidth','ap_snr_dv','ap_snr_v','ap_full_width')
+    hws = hws[np.isnan(hws)==False]
+    fws = fws[np.isnan(fws)==False]
+    snr_dvs = snr_dvs[np.isnan(snr_dvs)==False]
+    snr_vs = snr_vs[np.isnan(snr_vs)==False]
+    #%
+    
+    trace,ap_group_trace_peak_idx,sample_rate = (ephys_cell_attached.SweepMetadata()*ephysanal_cell_attached.APGroupTrace()&example_ap_group_key).fetch1('ap_group_trace','ap_group_trace_peak_idx','sample_rate')
+    trace_time = (np.arange(len(trace))-ap_group_trace_peak_idx)/sample_rate *1000
+    trace_filt = utils_ephys.gaussFilter(trace,sample_rate,sigma = .00005)  
+    trace_diff=np.diff(trace_filt)
+    trace_diff = trace_diff/np.max(trace_diff)
+    trace_time_diff = np.mean([trace_time[:-1],trace_time[1:]],0)
+    #%
+    
+    
+    logbins = np.logspace(np.log10(1),np.log10(1000),binnum)
+    bins_hw = np.linspace(0,2,binnum)
+    fig = plt.figure(figsize = [15,15])
+    ax_snr_dv_hist = fig.add_subplot(2,2,3)
+    ax_snr_dv_cumsum = ax_snr_dv_hist.twinx()
+    ax_snr_v_hist = fig.add_subplot(2,2,1)
+    ax_snr_v_cumsum = ax_snr_v_hist.twinx()
+    ax_hw_hist = fig.add_subplot(2,2,2)
+    ax_hw_cumsum = ax_hw_hist.twinx()
+    
+    ax_fw_hist = fig.add_subplot(2,2,4)
+    ax_fw_cumsum = ax_fw_hist.twinx()
+    fig_apwave = plt.figure(figsize = [10,15])
+    ax_apwave = fig_apwave.add_subplot(2,1,1)
+    ax_apwave_d = fig_apwave.add_subplot(2,1,2,sharex = ax_apwave)
+    ax_apwave.plot(trace_time,trace,'k-')
+    ax_apwave_d.plot(trace_time_diff,trace_diff,'k-')
+    ax_apwave.set_xlim([-ap_baseline_length,ap_baseline_length*2])
+    ax_apwave.set_ylabel('V')
+    ax_apwave.set_yticks([])
+    #ax_apwave.set_xticks([])
+    ax_apwave_d.set_ylabel('dV')
+    ax_apwave_d.set_yticks([])
+    ax_apwave_d.set_xlabel('ms')
+    
+    ax_snr_dv_hist.hist(snr_dvs,logbins,color='black')#,log = True
+    snrvals, binedges = np.histogram(snr_dvs,logbins)
+    bincenters = np.mean([binedges[:-1],binedges[1:]],0)
+    ax_snr_dv_hist.set_xscale('log')
+    ax_snr_dv_cumsum.plot(bincenters,np.cumsum(snrvals)/sum(snrvals),'r-')
+    ax_snr_dv_hist.set_xlim([4,1000])
+    ax_snr_dv_hist.set_title('SNR of dAPs')
+    ax_snr_dv_hist.set_ylabel('AP num')
+    ax_snr_dv_cumsum.set_ylim([0,1])
+    
+    ax_snr_v_hist.hist(snr_vs,logbins,color='black')#,log = True
+    snrvals, binedges = np.histogram(snr_vs,logbins)
+    bincenters = np.mean([binedges[:-1],binedges[1:]],0)
+    ax_snr_v_hist.set_xscale('log')
+    ax_snr_v_cumsum.plot(bincenters,np.cumsum(snrvals)/sum(snrvals),'r-')
+    ax_snr_v_hist.set_xlim([4,1000])
+    ax_snr_v_hist.set_title('SNR of APs')
+    ax_snr_v_hist.set_ylabel('AP num')
+    ax_snr_v_cumsum.set_ylim([0,1])
+    
+    
+    
+    ax_fw_hist.hist(fws,bins_hw,color='black')
+    fwvals, binedges = np.histogram(fws,bins_hw)
+    bincenters = np.mean([binedges[:-1],binedges[1:]],0)
+    #ax_hw_hist.set_xscale('log')
+    ax_fw_cumsum.plot(bincenters,np.cumsum(fwvals)/sum(fwvals),'r-')
+    ax_hw_hist.set_xlim([0,2])
+    ax_fw_hist.set_title('AP full width (ms)')
+    ax_fw_hist.set_ylabel('AP num')
+    ax_fw_cumsum.set_ylim([0,1])
+    
+    
+    ax_hw_hist.hist(hws,bins_hw,color='black')
+    hwvals, binedges = np.histogram(hws,bins_hw)
+    bincenters = np.mean([binedges[:-1],binedges[1:]],0)
+    #ax_hw_hist.set_xscale('log')
+    ax_hw_cumsum.plot(bincenters,np.cumsum(hwvals)/sum(hwvals),'r-')
+    ax_hw_hist.set_xlim([0,2])
+    ax_hw_hist.set_title('AP halfwidth (ms)')
+    ax_hw_hist.set_ylabel('AP num')
+    ax_hw_cumsum.set_ylim([0,1])
+
+
+
 def ap_scatter_onpick(event):
     axesdata = event.canvas.axesdata
     data = axesdata['data']
@@ -114,7 +211,7 @@ def ap_scatter_onpick(event):
     return True
 
 
-def plot_ap_features_scatter(ap_data = None):
+def plot_ap_features_scatter(plot_parameters,ap_data = None):
     if type(ap_data) != dict:
         ap_data_to_fetch = ['subject_id',
                             'session',
@@ -225,24 +322,24 @@ def plot_ap_features_scatter(ap_data = None):
     # ax_hw_amplitude_vc_mean.set_ylabel('Amplitude (pA)')
     # =============================================================================
     
-    cc_points_hw_amplitude, = ax_hw_amplitude_cc.plot(ap_data['ap_halfwidth'][ccidx],ap_data['ap_amplitude'][ccidx]*1000,'ko',ms=0.5, picker=pickertolerance)
-    vc_points_hw_amplitude, = ax_hw_amplitude_vc.plot(ap_data['ap_halfwidth'][vcidx],ap_data['ap_amplitude'][vcidx]*1e12,'ko',ms=0.5, picker=pickertolerance)
-    cc_points_fw_amplitude, = ax_fw_amplitude_cc.plot(ap_data['ap_full_width'][ccidx],ap_data['ap_amplitude'][ccidx]*1000,'ko',ms=0.5, picker=pickertolerance)
-    vc_points_fw_amplitude, = ax_fw_amplitude_vc.plot(ap_data['ap_full_width'][vcidx],ap_data['ap_amplitude'][vcidx]*1e12,'ko',ms=0.5, picker=pickertolerance)
-    cc_points_int_amplitude, = ax_int_amplitude_cc.plot(ap_data['ap_integral'][ccidx]*1000,ap_data['ap_amplitude'][ccidx]*1000,'ko',ms=0.5, picker=pickertolerance)
-    vc_points_int_amplitude, = ax_int_amplitude_vc.plot(ap_data['ap_integral'][vcidx]*1e12,ap_data['ap_amplitude'][vcidx]*1e12,'ko',ms=0.5, picker=pickertolerance)
-    cc_points_sn_sn, = ax_sn_sn_cc.plot(ap_data['ap_snr_v'][ccidx],ap_data['ap_snr_dv'][ccidx],'ko',ms=0.5, picker=pickertolerance)
-    vc_points_sn_sn, = ax_sn_sn_vc.plot(ap_data['ap_snr_v'][vcidx],ap_data['ap_snr_dv'][vcidx],'ko',ms=0.5, picker=pickertolerance)
+    cc_points_hw_amplitude, = ax_hw_amplitude_cc.plot(ap_data['ap_halfwidth'][ccidx],ap_data['ap_amplitude'][ccidx]*1000,'ko',ms=0.5, picker=pickertolerance,alpha = 0)
+    vc_points_hw_amplitude, = ax_hw_amplitude_vc.plot(ap_data['ap_halfwidth'][vcidx],ap_data['ap_amplitude'][vcidx]*1e12,'ko',ms=0.5, picker=pickertolerance,alpha = 0)
+    cc_points_fw_amplitude, = ax_fw_amplitude_cc.plot(ap_data['ap_full_width'][ccidx],ap_data['ap_amplitude'][ccidx]*1000,'ko',ms=0.5, picker=pickertolerance,alpha = 0)
+    vc_points_fw_amplitude, = ax_fw_amplitude_vc.plot(ap_data['ap_full_width'][vcidx],ap_data['ap_amplitude'][vcidx]*1e12,'ko',ms=0.5, picker=pickertolerance,alpha = 0)
+    cc_points_int_amplitude, = ax_int_amplitude_cc.plot(ap_data['ap_integral'][ccidx]*1000,ap_data['ap_amplitude'][ccidx]*1000,'ko',ms=0.5, picker=pickertolerance,alpha = 0)
+    vc_points_int_amplitude, = ax_int_amplitude_vc.plot(ap_data['ap_integral'][vcidx]*1e12,ap_data['ap_amplitude'][vcidx]*1e12,'ko',ms=0.5, picker=pickertolerance,alpha = 0)
+    cc_points_sn_sn, = ax_sn_sn_cc.plot(ap_data['ap_snr_v'][ccidx],ap_data['ap_snr_dv'][ccidx],'ko',ms=0.5, picker=pickertolerance,alpha = 0)
+    vc_points_sn_sn, = ax_sn_sn_vc.plot(ap_data['ap_snr_v'][vcidx],ap_data['ap_snr_dv'][vcidx],'ko',ms=0.5, picker=pickertolerance,alpha = 0)
     
     cc_points = [cc_points_hw_amplitude,cc_points_fw_amplitude,cc_points_int_amplitude,cc_points_sn_sn]
     vc_points = [vc_points_hw_amplitude,vc_points_fw_amplitude,vc_points_int_amplitude,vc_points_sn_sn]
     for cellidx,uniquecell in enumerate(uniquecells):
         #idxs = np.where((cell_IDs==uniquecell)&ccidx)[0]
         idxs = cell_stats['current clamp']['ap_list_idx'][cellidx]
-        ax_hw_amplitude_cc.plot(ap_data['ap_halfwidth'][idxs],ap_data['ap_amplitude'][idxs]*1000,'o',ms=1, picker=0)
-        ax_fw_amplitude_cc.plot(ap_data['ap_full_width'][idxs],ap_data['ap_amplitude'][idxs]*1000,'o',ms=1, picker=0)
-        ax_int_amplitude_cc.plot(ap_data['ap_integral'][idxs]*1000,ap_data['ap_amplitude'][idxs]*1000,'o',ms=1, picker=0)
-        ax_sn_sn_cc.plot(ap_data['ap_snr_v'][idxs],ap_data['ap_snr_dv'][idxs],'o',ms=1, picker=0)
+        ax_hw_amplitude_cc.plot(ap_data['ap_halfwidth'][idxs],ap_data['ap_amplitude'][idxs]*1000,'o',ms=1, picker=0,alpha = plot_parameters['alpha'])
+        ax_fw_amplitude_cc.plot(ap_data['ap_full_width'][idxs],ap_data['ap_amplitude'][idxs]*1000,'o',ms=1, picker=0,alpha = plot_parameters['alpha'])
+        ax_int_amplitude_cc.plot(ap_data['ap_integral'][idxs]*1000,ap_data['ap_amplitude'][idxs]*1000,'o',ms=1, picker=0,alpha = plot_parameters['alpha'])
+        ax_sn_sn_cc.plot(ap_data['ap_snr_v'][idxs],ap_data['ap_snr_dv'][idxs],'o',ms=1, picker=0,alpha = plot_parameters['alpha'])
     # =============================================================================
     #     ax_hw_amplitude_cc_mean. errorbar(cell_stats['current clamp']['ap_halfwidth_mean'][cellidx],
     #                                       cell_stats['current clamp']['ap_amplitude_mean'][cellidx], 
@@ -253,10 +350,10 @@ def plot_ap_features_scatter(ap_data = None):
         
         #idxs = np.where((cell_IDs==uniquecell)&vcidx)[0]
         idxs = cell_stats['voltage clamp']['ap_list_idx'][cellidx]
-        ax_hw_amplitude_vc.plot(ap_data['ap_halfwidth'][idxs],ap_data['ap_amplitude'][idxs]*1e12,'o',ms=1, picker=0)
-        ax_fw_amplitude_vc.plot(ap_data['ap_full_width'][idxs],ap_data['ap_amplitude'][idxs]*1e12,'o',ms=1, picker=0)
-        ax_int_amplitude_vc.plot(ap_data['ap_integral'][idxs]*1e12,ap_data['ap_amplitude'][idxs]*1e12,'o',ms=1, picker=0)
-        ax_sn_sn_vc.plot(ap_data['ap_snr_v'][idxs],ap_data['ap_snr_dv'][idxs],'o',ms=1, picker=0)
+        ax_hw_amplitude_vc.plot(ap_data['ap_halfwidth'][idxs],ap_data['ap_amplitude'][idxs]*1e12,'o',ms=1, picker=0,alpha = plot_parameters['alpha'])
+        ax_fw_amplitude_vc.plot(ap_data['ap_full_width'][idxs],ap_data['ap_amplitude'][idxs]*1e12,'o',ms=1, picker=0,alpha = plot_parameters['alpha'])
+        ax_int_amplitude_vc.plot(ap_data['ap_integral'][idxs]*1e12,ap_data['ap_amplitude'][idxs]*1e12,'o',ms=1, picker=0,alpha = plot_parameters['alpha'])
+        ax_sn_sn_vc.plot(ap_data['ap_snr_v'][idxs],ap_data['ap_snr_dv'][idxs],'o',ms=1, picker=0,alpha = plot_parameters['alpha'])
     # =============================================================================
     #     ax_hw_amplitude_vc_mean.errorbar(cell_stats['voltage clamp']['ap_halfwidth_mean'][cellidx],
     #                                       cell_stats['voltage clamp']['ap_amplitude_mean'][cellidx], 
@@ -301,6 +398,7 @@ def plot_ap_features_scatter(ap_data = None):
     return outdata 
 
 def cell_clustering_plots(recording_mode = 'current clamp',
+                          sensor_colors=None,
                           minapnum = 10,
                           minsnr = 10,
                           isi_percentile_needed = 3,
@@ -318,7 +416,8 @@ def cell_clustering_plots(recording_mode = 'current clamp',
                          UMAP_n_neigbors =20,
                          UMAP_min_dist = 0.01,
                          UMAP_n_epochs = 1000,
-                         pickertolerance = 5 ):
+                         pickertolerance = 5,
+                         invert_y_axis = True):
     reducer = umap.UMAP()
     reducer.verbose=True
 
@@ -329,11 +428,12 @@ def cell_clustering_plots(recording_mode = 'current clamp',
     
     cell_id_features = ephys_cell_attached.Cell.primary_key
     cell_id_features.append('cell_type')
+    cell_id_features.append('session_calcium_sensor')
     average_wave_features = ['average_ap_wave','average_ap_wave_time']
     features_all = features_needed.copy()
     features_all.extend(cell_id_features)
     features_all.extend(average_wave_features)
-    apfeatureslist = (ephys_cell_attached.Cell()*ephysanal_cell_attached.CellSpikeParameters()&'ap_snr_mean > {}'.format(minsnr)&'recording_mode = "{}"'.format(recording_mode)& 'ap_quantity > {}'.format(minapnum)).fetch(*features_all)
+    apfeatureslist = (imaging_gt.SessionCalciumSensor()*ephys_cell_attached.Cell()*ephysanal_cell_attached.CellSpikeParameters()&'ap_snr_mean > {}'.format(minsnr)&'recording_mode = "{}"'.format(recording_mode)& 'ap_quantity > {}'.format(minapnum)).fetch(*features_all)
     ap_cell_data = dict()
     for data,data_name in zip(apfeatureslist,features_all):
         try:
@@ -424,20 +524,37 @@ def cell_clustering_plots(recording_mode = 'current clamp',
     
     propnames = list(ap_cell_data.keys())
     selectedpropertyindices = [0,1]
-    points_prop_vs_prop_1, = ax_prop_vs_prop_1.plot(ap_cell_data[propnames[selectedpropertyindices[0]]],ap_cell_data[propnames[selectedpropertyindices[1]]],'ko',picker=pickertolerance)
-    idx = (cell_id['cell_type'] == 'pyr')
-    ax_prop_vs_prop_1.plot(ap_cell_data[propnames[selectedpropertyindices[0]]][idx],ap_cell_data[propnames[selectedpropertyindices[1]]][idx],'ro')
-    idx = (cell_id['cell_type'] == 'int')
-    ax_prop_vs_prop_1.plot(ap_cell_data[propnames[selectedpropertyindices[0]]][idx],ap_cell_data[propnames[selectedpropertyindices[1]]][idx],'bo')
+    if invert_y_axis:
+        points_prop_vs_prop_1, = ax_prop_vs_prop_1.semilogy(ap_cell_data[propnames[selectedpropertyindices[0]]],1/ap_cell_data[propnames[selectedpropertyindices[1]]],'ko',picker=pickertolerance)
+    else:
+        points_prop_vs_prop_1, = ax_prop_vs_prop_1.plot(ap_cell_data[propnames[selectedpropertyindices[0]]],ap_cell_data[propnames[selectedpropertyindices[1]]],'ko',picker=pickertolerance)
+    for sensor_now in sensor_colors.keys():
+        idx = (cell_id['session_calcium_sensor'] == sensor_now)
+        if invert_y_axis:
+            ax_prop_vs_prop_1.semilogy(ap_cell_data[propnames[selectedpropertyindices[0]]][idx],1/ap_cell_data[propnames[selectedpropertyindices[1]]][idx],'o',color = sensor_colors[sensor_now])
+        else:
+            ax_prop_vs_prop_1.plot(ap_cell_data[propnames[selectedpropertyindices[0]]][idx],ap_cell_data[propnames[selectedpropertyindices[1]]][idx],'o',color = sensor_colors[sensor_now])
+# =============================================================================
+#     if sensor_colors==None:
+#         idx = (cell_id['cell_type'] == 'pyr')
+#         ax_prop_vs_prop_1.plot(ap_cell_data[propnames[selectedpropertyindices[0]]][idx],ap_cell_data[propnames[selectedpropertyindices[1]]][idx],'ro')
+#         idx = (cell_id['cell_type'] == 'int')
+#         ax_prop_vs_prop_1.plot(ap_cell_data[propnames[selectedpropertyindices[0]]][idx],ap_cell_data[propnames[selectedpropertyindices[1]]][idx],'bo')
+# =============================================================================
     
     ax_prop_vs_prop_1.set_xlabel(propnames[selectedpropertyindices[0]])
     ax_prop_vs_prop_1.set_ylabel(propnames[selectedpropertyindices[1]])
     
     points_pca, = ax_pca.plot(pcs[:,0],pcs[:,1],pcs[:,2], 'ko',alpha = 1,picker=pickertolerance) #+' projecting, motor related'
-    idx = (cell_id['cell_type'] == 'pyr')
-    ax_pca.plot(pcs[idx,0],pcs[idx,1],pcs[idx,2], 'ro',alpha = 1,label='putative pyramidal cell')
-    idx = (cell_id['cell_type'] == 'int')   
-    ax_pca.plot(pcs[idx,0],pcs[idx,1],pcs[idx,2], 'bo',alpha = 1,label='putative interneuron')
+    for sensor_now in sensor_colors.keys():
+        idx = (cell_id['session_calcium_sensor'] == sensor_now)
+        ax_pca.plot(pcs[idx,0],pcs[idx,1],pcs[idx,2], 'o',alpha = 1,label=sensor_now,color = sensor_colors[sensor_now])
+# =============================================================================
+#     idx = (cell_id['cell_type'] == 'pyr')
+#     ax_pca.plot(pcs[idx,0],pcs[idx,1],pcs[idx,2], 'ro',alpha = 1,label='putative pyramidal cell')
+#     idx = (cell_id['cell_type'] == 'int')   
+#     ax_pca.plot(pcs[idx,0],pcs[idx,1],pcs[idx,2], 'bo',alpha = 1,label='putative interneuron')
+# =============================================================================
     ax_pca.legend()
     ax_pca.set_xlabel('PC{}'.format(0+1))
     ax_pca.set_ylabel('PC{}'.format(1+1))
@@ -453,17 +570,22 @@ def cell_clustering_plots(recording_mode = 'current clamp',
     
     
     points_tsne, = ax_tsne.plot(tsne_results[:,0],tsne_results[:,1],'ko',ms=8,picker=pickertolerance)
-    
-    idx = (cell_id['cell_type'] == 'pyr')
-    ax_tsne.plot(tsne_results[idx,0],tsne_results[idx,1],'ro',label='putative pyramidal cell',ms=8, alpha = 1)#+' projecting, motor related'
-    idx = (cell_id['cell_type'] == 'int')
-    ax_tsne.plot(tsne_results[idx,0],tsne_results[idx,1],'bo',label='putative interneuron',ms=8, alpha = 1)#+' projecting, motor related'
+    for sensor_now in sensor_colors.keys():
+        idx = (cell_id['session_calcium_sensor'] == sensor_now)
+        ax_tsne.plot(tsne_results[idx,0],tsne_results[idx,1],'o',label=sensor_now,color = sensor_colors[sensor_now])#+' projecting, motor related'
+        
+# =============================================================================
+#     idx = (cell_id['cell_type'] == 'pyr')
+#     ax_tsne.plot(tsne_results[idx,0],tsne_results[idx,1],'ro',label='putative pyramidal cell',ms=8, alpha = 1)#+' projecting, motor related'
+#     idx = (cell_id['cell_type'] == 'int')
+#     ax_tsne.plot(tsne_results[idx,0],tsne_results[idx,1],'bo',label='putative interneuron',ms=8, alpha = 1)#+' projecting, motor related'
+# =============================================================================
     # =============================================================================
     # for i,txt in enumerate(cell_names):
     #     ax_tsne.annotate(txt,(tsne_results[i,0],tsne_results[i,1]))
     # =============================================================================
     ax_tsne.set_title('tSNE - perplexity: {}, learning rate: {}'.format(TSNE_perplexity,TSNE_learning_rate))    
-    plt.legend()
+    ax_tsne.legend()
     #%
     
     #% UMAP
@@ -473,11 +595,15 @@ def cell_clustering_plots(recording_mode = 'current clamp',
     
     
     points_umap, = ax_umap.plot(umap_results[:,0],umap_results[:,1],'ko',ms=8,picker=pickertolerance)
-    
-    idx = (cell_id['cell_type'] == 'pyr')
-    ax_umap.plot(umap_results[idx,0],umap_results[idx,1],'ro',label='putative pyramidal cell',ms=8, alpha = 1)#+' projecting, motor related'
-    idx = (cell_id['cell_type'] == 'int')
-    ax_umap.plot(umap_results[idx,0],umap_results[idx,1],'bo',label='putative interneuron',ms=8, alpha = 1)
+    for sensor_now in sensor_colors.keys():
+        idx = (cell_id['session_calcium_sensor'] == sensor_now)
+        ax_umap.plot(umap_results[idx,0],umap_results[idx,1],'o',label=sensor_now,color = sensor_colors[sensor_now],ms=8, alpha = 1)#+' projecting, motor related'
+# =============================================================================
+#     idx = (cell_id['cell_type'] == 'pyr')
+#     ax_umap.plot(umap_results[idx,0],umap_results[idx,1],'ro',label='putative pyramidal cell',ms=8, alpha = 1)#+' projecting, motor related'
+#     idx = (cell_id['cell_type'] == 'int')
+#     ax_umap.plot(umap_results[idx,0],umap_results[idx,1],'bo',label='putative interneuron',ms=8, alpha = 1)
+# =============================================================================
     ax_umap.set_title('uMAP - neighbors: {}, min_dist: {}, learning rate: {}'.format(reducer.n_neigbors,
                                                                                      reducer.min_dist,
                                                                                      reducer.learning_rate))        
@@ -506,13 +632,16 @@ def cell_clustering_plots(recording_mode = 'current clamp',
     #%
     for i,cell_ID in enumerate(R['ivl']):
         cell_idx = int(cell_ID)
-        if cell_id['cell_type'][cell_idx] == 'pyr':
-            color = 'r'
-        elif cell_id['cell_type'][cell_idx] == 'int':
-            color = 'b'
-        else:
-            color = 'k'
-        ax_clust.plot(5+i*10,0,color+'o',markersize = 15)
+        color = sensor_colors[cell_id['session_calcium_sensor'][cell_idx]]
+# =============================================================================
+#         if cell_id['cell_type'][cell_idx] == 'pyr':
+#             color = 'r'
+#         elif cell_id['cell_type'][cell_idx] == 'int':
+#             color = 'b'
+#         else:
+#             color = 'k'
+# =============================================================================
+        ax_clust.plot(5+i*10,0,'o',color = color, markersize = 15)
     ax_clust.tick_params(axis='x', which='major', labelsize=8) 
     #trace_fig = plt.figure(figsize = [10,10])
     data_out = {'umap_results':umap_results,
@@ -541,7 +670,9 @@ def cell_clustering_plots(recording_mode = 'current clamp',
                 'ax_components':ax_components,
                 'ax_prop_vs_prop_1':ax_prop_vs_prop_1,
                 'data':data_out,
-                'trace_fig':None}
+                'trace_fig':None,
+                'sensor_colors':sensor_colors,
+                'invert_y_axis':invert_y_axis}
     fig.canvas.axesdata=axesdata
     fig.canvas.idxsofar = np.asarray([],int)
     fig.canvas.selectedpropertyindices = selectedpropertyindices 
@@ -554,6 +685,8 @@ def ap_cell_onpick(event):
     
     axesdata = event.canvas.axesdata
     data = axesdata['data']
+    sensor_colors = axesdata['sensor_colors']
+    invert_y_axis = axesdata['invert_y_axis']
     if not(event.artist == axesdata['points_tsne'] or event.artist == axesdata['points_umap'] or event.artist == axesdata['image_pca_components'] or event.artist == axesdata['points_prop_vs_prop_1']):
         return None
     if event.artist == axesdata['image_pca_components']:
@@ -628,13 +761,25 @@ def ap_cell_onpick(event):
     
     propnames = list(data['ap_cell_data'].keys())
     selectedpropertyindices = event.canvas.selectedpropertyindices
-    
-    points_prop_vs_prop_1, = axesdata['ax_prop_vs_prop_1'].plot(data['ap_cell_data'][propnames[selectedpropertyindices[0]]],data['ap_cell_data'][propnames[selectedpropertyindices[1]]],'ko',picker=5)
+    if invert_y_axis:
+        points_prop_vs_prop_1, = axesdata['ax_prop_vs_prop_1'].semilogy(data['ap_cell_data'][propnames[selectedpropertyindices[0]]],1/data['ap_cell_data'][propnames[selectedpropertyindices[1]]],'ko',picker=5)
+    else:
+        points_prop_vs_prop_1, = axesdata['ax_prop_vs_prop_1'].plot(data['ap_cell_data'][propnames[selectedpropertyindices[0]]],data['ap_cell_data'][propnames[selectedpropertyindices[1]]],'ko',picker=5)
     event.canvas.axesdata['points_prop_vs_prop_1'] = points_prop_vs_prop_1
-    idx = (data['cell_id']['cell_type'] == 'pyr')
-    axesdata['ax_prop_vs_prop_1'].plot(data['ap_cell_data'][propnames[selectedpropertyindices[0]]][idx],data['ap_cell_data'][propnames[selectedpropertyindices[1]]][idx],'ro')
-    idx = (data['cell_id']['cell_type'] == 'int')
-    axesdata['ax_prop_vs_prop_1'].plot(data['ap_cell_data'][propnames[selectedpropertyindices[0]]][idx],data['ap_cell_data'][propnames[selectedpropertyindices[1]]][idx],'bo')
+    
+    for sensor_now in sensor_colors.keys():
+        idx = (data['cell_id']['session_calcium_sensor'] == sensor_now)
+        if invert_y_axis:
+            axesdata['ax_prop_vs_prop_1'].semilogy(data['ap_cell_data'][propnames[selectedpropertyindices[0]]][idx],1/data['ap_cell_data'][propnames[selectedpropertyindices[1]]][idx],'o',color = sensor_colors[sensor_now])
+        else:
+            axesdata['ax_prop_vs_prop_1'].plot(data['ap_cell_data'][propnames[selectedpropertyindices[0]]][idx],data['ap_cell_data'][propnames[selectedpropertyindices[1]]][idx],'o',color = sensor_colors[sensor_now])
+         
+# ============================================================================
+#     idx = (data['cell_id']['cell_type'] == 'pyr')
+#     axesdata['ax_prop_vs_prop_1'].plot(data['ap_cell_data'][propnames[selectedpropertyindices[0]]][idx],data['ap_cell_data'][propnames[selectedpropertyindices[1]]][idx],'ro')
+#     idx = (data['cell_id']['cell_type'] == 'int')
+#     axesdata['ax_prop_vs_prop_1'].plot(data['ap_cell_data'][propnames[selectedpropertyindices[0]]][idx],data['ap_cell_data'][propnames[selectedpropertyindices[1]]][idx],'bo')
+# =============================================================================
     axesdata['ax_prop_vs_prop_1'].set_xlabel(propnames[selectedpropertyindices[0]])
     axesdata['ax_prop_vs_prop_1'].set_ylabel(propnames[selectedpropertyindices[1]])
     axesdata['ax_prop_vs_prop_1'].set_prop_cycle(None)
