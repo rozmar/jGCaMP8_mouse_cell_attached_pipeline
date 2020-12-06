@@ -112,6 +112,62 @@ class ActionPotential(dj.Computed):
             print(key)
             key['ap_num']=0
             self.insert1(key,skip_duplicates=True)
+
+@schema
+class SweepAPQC(dj.Computed):
+    definition = """
+    -> ephys_cell_attached.Sweep
+    ---
+    sweep_ap_snr_dv_min=null       : double
+    sweep_ap_snr_dv_median=null       : double
+    sweep_ap_snr_dv_percentiles=null  : blob #10,20,30,40..90th percentiles
+    sweep_ap_snr_v_min=null       : double
+    sweep_ap_snr_v_median=null       : double
+    sweep_ap_snr_v_percentiles=null  : blob #10,20,30,40..90th percentiles
+    sweep_ap_hw_median=null           : double 
+    sweep_ap_hw_percentiles=null      : blob #10,20,30,40..90th percentiles
+    sweep_ap_hw_max=null           : double 
+    sweep_ap_hw_std=null           : double 
+    sweep_ap_hw_std_per_median=null           : double 
+    sweep_ap_fw_median=null           : double 
+    sweep_ap_fw_percentiles=null      : blob #10,20,30,40..90th percentiles
+    sweep_ap_fw_max=null           : double 
+    sweep_ap_fw_std=null           : double 
+    sweep_ap_fw_std_per_median=null           : double 
+    """
+    def make(self, key):
+        percentiles = [10,20,30,40,50,60,70,80,90]
+        hws,snr_dvs,snr_vs,fws = (ActionPotential()&key).fetch('ap_halfwidth','ap_snr_dv','ap_snr_v','ap_full_width')
+        hws = hws[np.isnan(hws)==False]
+        fws = fws[np.isnan(fws)==False]
+        snr_dvs = snr_dvs[np.isnan(snr_dvs)==False]
+        snr_vs = snr_vs[np.isnan(snr_vs)==False]
+        if len(hws)>=10:
+            key['sweep_ap_snr_v_percentiles'] = np.percentile(snr_vs,percentiles)
+            key['sweep_ap_snr_dv_percentiles'] = np.percentile(snr_dvs,percentiles)
+            key['sweep_ap_hw_percentiles'] = np.percentile(hws,percentiles)
+            key['sweep_ap_fw_percentiles'] = np.percentile(fws,percentiles)
+        if len(hws)>=1:
+            key['sweep_ap_snr_v_min'] = np.nanmin(snr_vs)
+            key['sweep_ap_snr_v_median'] = np.nanmedian(snr_vs)
+            key['sweep_ap_snr_dv_min'] = np.nanmin(snr_dvs)
+            key['sweep_ap_snr_dv_median'] = np.nanmedian(snr_dvs)            
+            
+            key['sweep_ap_hw_max'] = np.nanmax(hws)
+            key['sweep_ap_hw_median'] = np.nanmedian(hws)
+            key['sweep_ap_hw_std'] = np.nanstd(hws)
+            
+            key['sweep_ap_fw_max'] = np.nanmax(fws)
+            key['sweep_ap_fw_median'] = np.nanmedian(fws)
+            key['sweep_ap_fw_std'] = np.nanstd(fws)
+            
+            key['sweep_ap_fw_std_per_median'] = key['sweep_ap_fw_std']/key['sweep_ap_fw_median']
+            key['sweep_ap_hw_std_per_median'] = key['sweep_ap_hw_std']/key['sweep_ap_hw_median']
+            
+        self.insert1(key,skip_duplicates=True)
+        
+    
+
             
 @schema
 class APGroup(dj.Imported):
@@ -144,7 +200,7 @@ class IngestAPGroup(dj.Imported):
         key_original = key.copy()
         key_original['ap_group_complete'] = 1
         min_baseline_time = .1
-        max_integration_time = .1
+        max_integration_time = .02 #.1 for pyramidal cells
         
         sweep_numbers = (ephys_cell_attached.Sweep()&key).fetch('sweep_number')
         apgroup_list = list()
@@ -191,7 +247,7 @@ class IngestAPGroup(dj.Imported):
         APGroup().insert(apgroup_list, allow_direct_insert=True)#ephysanal_cell_attached
         dj.conn().ping()
         APGroup.APGroupMember().insert(groupmember_list, allow_direct_insert=True)      #ephysanal_cell_attached
-        self.insert1(key,skip_duplicates=True)
+        self.insert1(key_original,skip_duplicates=True)
 
 
 
