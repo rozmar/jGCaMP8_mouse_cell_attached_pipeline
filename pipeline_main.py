@@ -1,5 +1,5 @@
 import numpy as np
-from utils import utils_pipeline
+import utils.utils_pipeline as utils_pipeline
 import notebook_google.notebook_main as online_notebook
 from pipeline.ingest import datapipeline_metadata,datapipeline_elphys,datapipeline_imaging,datapipeline_imaging_gt
 #%% set parameters
