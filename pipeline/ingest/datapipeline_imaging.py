@@ -13,7 +13,7 @@ import pandas as pd
 dj.conn()
 from pipeline import pipeline_tools
 from pipeline import lab, experiment, imaging, ephys_cell_attached, ephysanal_cell_attached, imaging_gt
-from utils_pipeline import extract_scanimage_metadata, extract_files_from_dir
+from utils.utils_pipeline import extract_scanimage_metadata, extract_files_from_dir
 from suite2p.detection.masks import create_neuropil_masks, create_cell_pix
 #import ray
 import time
