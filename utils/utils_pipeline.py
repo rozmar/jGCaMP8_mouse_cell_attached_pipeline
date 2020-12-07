@@ -479,3 +479,4 @@ def suite2p_rerun_classifier(basedir = '/home/rozmar/Data/Calcium_imaging/suite2
 #     with open(os.path.join(destdir,'listfile.txt'), 'w') as filehandle:
 #         filehandle.writelines("%s\n" % path for path in filepaths)
 # =============================================================================
+                        
