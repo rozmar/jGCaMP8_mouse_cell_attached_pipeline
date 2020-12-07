@@ -13,9 +13,23 @@ schema = dj.schema(get_schema_name('ephys_cell_attached'),locals())
 # =============================================================================
 #schema = dj.schema('rozmar_tutorial', locals())
 
+@schema
+class DyeName(dj.Lookup): #dye
+    definition = """
+    dye_name  :  varchar(100)
+    """
+    contents = zip(('Alexa 594','Alexa 488'))
 
 @schema
-class CellType(dj.Lookup):
+class SessionPipetteFill(dj.Imported):
+    definition = """
+    -> experiment.Session
+    -> DyeName
+    dye_concentration : double # in micromoles per liter
+    """
+
+@schema
+class CellType(dj.Lookup): #PUTATIVE cell type based on first impression
     definition = """
     #
     cell_type  :  varchar(100)
@@ -37,8 +51,8 @@ class Cell(dj.Imported):
     cell_number: smallint
     ---
     -> CellType
-    depth: smallint # microns from the surface of the brain
-    cell_recording_start: time #time at the start of the first sweep
+    depth = NULL         : smallint # microns from the surface of the brain
+    cell_recording_start : time #time at the start of the first sweep
     """
 
 @schema
@@ -143,4 +157,12 @@ class SweepImagingExposure(dj.Imported): #TO DO: fill in metadata
     -> Sweep
     ---
     imaging_exposure_trace  : longblob #
+    """
+    
+@schema
+class SweepVisualStimulus(dj.Imported): #TO DO: fill in metadata
+    definition = """
+    -> Sweep
+    ---
+    visual_stimulus_trace  : longblob #
     """

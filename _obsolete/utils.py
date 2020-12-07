@@ -167,6 +167,7 @@ def getEdges(sig, minDist_samples = 50, diffThresh = 1, edge = 'positive'):
 
 
 def processVisMat(vis_mat_path):
+    #%%
     """
     processVisMat
         load visual stim file and get relevant parameters
@@ -202,7 +203,16 @@ def processVisMat(vis_mat_path):
     vis['numStim'] = mat[8][0][0]
     vis['angle'] = mat[9][0]
     vis['trials'] = mat[10]
-    
+    vis['trials_list'] = dict()
+    keys = vis['trials'][0][0].dtype.fields.keys()
+    for key in keys:
+        vis['trials_list'][key]=list()
+        for trial in vis['trials'][0]:
+            vis['trials_list'][key].append(trial[key][0][0][0][0])
+            
+        
+        
+    #%%
     return vis
 
 

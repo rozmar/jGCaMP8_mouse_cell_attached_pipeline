@@ -2,7 +2,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 from pywavesurfer import ws
-import utils
+import _obsolete.utils as utils
 from matplotlib import cm as colormap
 import time
 import scipy

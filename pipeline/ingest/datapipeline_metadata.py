@@ -10,26 +10,25 @@ dj.conn()
 #from pipeline import pipeline_tools
 from pipeline import lab#, experiment
 #%%
-def populatemetadata():
+def populatemetadata(updatemetadata = False):
     #%% save metadata from google drive if necessairy
-    online_notebook.update_metadata(dj.config['metadata.notebook_name'],dj.config['locations.metadata_surgery_experiment'])
-    
-    
-    lastmodify = online_notebook.fetch_lastmodify_time('Lab metadata')
-    with open(dj.config['locations.metadata_lab']+'last_modify_time.json') as timedata:
-        lastmodify_prev = json.loads(timedata.read())
-    if lastmodify != lastmodify_prev:
-        print('updating Lab metadata from google drive')
-        dj.config['locations.metadata_lab']
-        IDs = ['Experimenter','Rig','Virus']
-        for ID in IDs:
-            df_wr = online_notebook.fetch_lab_metadata(ID)
-            if type(df_wr) == pd.DataFrame:
-                df_wr.to_csv(dj.config['locations.metadata_lab']+ID+'.csv') 
-    
-        with open(dj.config['locations.metadata_lab']+'last_modify_time.json', "w") as write_file:
-            json.dump(lastmodify, write_file)
-        print('Lab metadata updated')
+    if updatemetadata:
+        online_notebook.update_metadata(dj.config['metadata.notebook_name'],dj.config['locations.metadata_surgery_experiment'])
+        lastmodify = online_notebook.fetch_lastmodify_time('Lab metadata')
+        with open(dj.config['locations.metadata_lab']+'last_modify_time.json') as timedata:
+            lastmodify_prev = json.loads(timedata.read())
+        if lastmodify != lastmodify_prev:
+            print('updating Lab metadata from google drive')
+            dj.config['locations.metadata_lab']
+            IDs = ['Experimenter','Rig','Virus']
+            for ID in IDs:
+                df_wr = online_notebook.fetch_lab_metadata(ID)
+                if type(df_wr) == pd.DataFrame:
+                    df_wr.to_csv(dj.config['locations.metadata_lab']+ID+'.csv') 
+        
+            with open(dj.config['locations.metadata_lab']+'last_modify_time.json', "w") as write_file:
+                json.dump(lastmodify, write_file)
+            print('Lab metadata updated')
     
     #%% add users
     df_experimenters = pd.read_csv(dj.config['locations.metadata_lab']+'Experimenter.csv')
@@ -93,7 +92,7 @@ def populatemetadata():
     df_surgery = pd.read_csv(dj.config['locations.metadata_surgery_experiment']+'Surgery.csv')
     #%%
     for item in df_surgery.iterrows():
-        if item[1]['project'] == dj.config['project'] and (item[1]['status'] == 'training' or item[1]['status'] == 'sacrificed'):
+        if item[1]['project'].lower() == dj.config['project'].lower() and (item[1]['status'] == 'training' or item[1]['status'] == 'sacrificed'):
             subjectdata = {
                     'subject_id': item[1]['animal#'],
                     'cage_number': item[1]['cage#'],
@@ -133,7 +132,7 @@ def populatemetadata():
                                 'skull_reference':item[1]['craniotomy reference ('+str(cranioidx)+')'],
                                 'ml_location':item[1]['craniotomy lateral ('+str(cranioidx)+')'],
                                 'ap_location':item[1]['craniotomy anterior ('+str(cranioidx)+')'],
-                                'surgery_procedure_description': 'craniotomy: ' + item[1]['craniotomy comments ('+str(cranioidx)+')'],
+                                'surgery_procedure_description': 'craniotomy: ' + str(item[1]['craniotomy comments ('+str(cranioidx)+')']),
                                 }
                         try:
                             lab.Surgery.Procedure().insert1(proceduredata)
