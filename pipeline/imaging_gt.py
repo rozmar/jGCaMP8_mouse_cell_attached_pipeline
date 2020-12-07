@@ -47,6 +47,7 @@ class MovieCalciumWaveSNR(dj.Computed):
     ---
     movie_event_num                   : int     #only events with given minimum inter-event intervals
     movie_ap_num                      : double  #only in the events
+    movie_total_ap_num                    : double  #only in the events
     movie_mean_cawave_snr_per_ap      : double  
     movie_median_cawave_snr_per_ap    : double
     movie_mean_ap_snr                 : double
@@ -73,10 +74,12 @@ class MovieCalciumWaveSNR(dj.Computed):
                      }
         cawaves = ephysanal_cell_attached.APGroup()*CalciumWave.CalciumWaveProperties()&key&key_extra&preisi_cond&postisi_cond#imaging_gt.
         cawave_snr,ap_group_ap_num,ap_group_min_snr_dv=(cawaves).fetch('cawave_snr','ap_group_ap_num','ap_group_min_snr_dv')
+        all_aps = (ephysanal_cell_attached.ActionPotential()*ROISweepCorrespondance())&key#imaging_gt
         #%%
         if len(cawave_snr)>0:
             cawave_snr_per_ap = cawave_snr/ap_group_ap_num
             key['movie_event_num'] = len(cawave_snr)
+            key['movie_total_ap_num'] = len(all_aps)
             key['movie_ap_num'] = np.sum(ap_group_ap_num)
             key['movie_mean_cawave_snr_per_ap'] = np.nanmean(cawave_snr_per_ap)
             key['movie_median_cawave_snr_per_ap'] = np.nanmedian(cawave_snr_per_ap)
