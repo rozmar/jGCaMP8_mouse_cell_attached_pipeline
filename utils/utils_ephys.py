@@ -83,9 +83,11 @@ def remove_stim_artefacts_without_stim(trace, sample_rate):
         peaks,ampl = signal.find_peaks(np.abs(dv), height=thresh)
         peaks = peaks*downsample_factor +int(downsample_factor/2)
         for peak in peaks:
-            difi  = trace[peak-cut_out_step] - trace[peak+cut_out_step]
-            trace[peak-cut_out_step:] =trace[peak-cut_out_step:]+ difi
-            trace[peak-cut_out_step:peak+cut_out_step] =trace[peak-cut_out_step-1]
+            cutout_start_idx = np.max([1,peak-cut_out_step])
+            cutout_end_idx = np.min([peak+cut_out_step,len(trace)-1])
+            difi  = trace[cutout_start_idx] - trace[cutout_end_idx]
+            trace[cutout_start_idx:] =trace[cutout_start_idx:]+ difi
+            trace[cutout_start_idx:cutout_end_idx] =trace[cutout_start_idx-1]
             stim_amplitudes.append(difi)
             stim_idxs.append(peak)
      #%%       

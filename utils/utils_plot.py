@@ -4,6 +4,7 @@ dj.conn()
 from pipeline import pipeline_tools,lab, experiment, ephys_cell_attached,ephysanal_cell_attached, imaging, imaging_gt
 import scipy.ndimage as ndimage
 import scipy.stats as stats
+from scipy import signal
 def lighten_color(color, amount=0.5):
     """
     Lightens the given color by multiplying (1-luminosity) by the given amount.
@@ -28,6 +29,20 @@ def gaussFilter(sig,sRate,sigma = .00005):
     #sigma = .00005
     sig_f = ndimage.gaussian_filter(sig,sigma/si)
     return sig_f
+
+def hpFilter(sig, HPfreq, order, sRate, padding = True):
+    """
+    High pass filter
+    -enable padding to avoid edge artefact
+    """
+    padlength=10000
+    sos = signal.butter(order, HPfreq, 'hp', fs=sRate, output='sos')
+    if padding: 
+        sig_out = signal.sosfilt(sos, np.concatenate([sig[padlength-1::-1],sig,sig[:-padlength-1:-1]]))
+        sig_out = sig_out[padlength:-padlength]
+    else:
+        sig_out = signal.sosfilt(sos, sig)
+    return sig_out
 
 def remove_nans_from_trace(bin_mean):
     while sum(np.isnan(bin_mean))>0:
