@@ -51,12 +51,13 @@ ca_wave_parameters = {'only_manually_labelled_movies':False,
                       'min_post_isi':.5,
                       'max_sweep_ap_hw_std_per_median':.2,
                       'min_sweep_ap_snr_dv_median':10,
-                      'gaussian_filter_sigma':10,#0,5,10,20,50
+                      'gaussian_filter_sigma':5,#0,5,10,20,50
                       'neuropil_subtraction':'0.8',#'none','0.7','calculated','0.8'
                       'neuropil_number':1,#0,1 # 0 is 2 pixel , 1 is 4 pixels left out around the cell
-                      'sensors': ['GCaMP7F','XCaMPgf','456','686','688'], # this determines the order of the sensors
+                      'sensors': ['GCaMP7F','456','686','688'], # this determines the order of the sensors,'XCaMPgf'
                       'ephys_recording_mode':'current clamp',
-                      'minimum_f0_value':20 # when the neuropil is bright, the F0 can go negative after neuropil subtraction
+                      'minimum_f0_value':20, # when the neuropil is bright, the F0 can go negative after neuropil subtraction
+                      'min_channel_offset':100 # PMT error
                       }
 if leave_out_putative_interneurons:
     ca_wave_parameters['max_ap_peak_to_trough_time_median']=0.65
@@ -111,85 +112,85 @@ ca_traces_dict_1ap_pyr,ca_traces_dict_by_cell_1ap_pyr  = utils_plot.collect_ca_w
                                                                                            wave_parameters)
 
 #%%
+#%%
+from utils import utils_plot
 superres_parameters={'sensor_colors':sensor_colors,
                      'normalize_raw_trace_offset':True,#set to 0
                      'min_ap_per_apnum':10, # filters only cell-wise trace
-                     'bin_step_for_cells':1,
+                     'bin_step_for_cells':.5,
                      'bin_size_for_cells':8,
-                     'bin_step':1,
+                     'bin_step':.5,
                      'bin_size':8,
                      'start_time':-50, # ms
                      'end_time':500,#ms
                      'traces_to_use':['f_corr','dff','f_corr_normalized'],
                      'cell_wise_analysis':True,
-                     'dogaussian':False
+                     'dogaussian':True,
+                     'double_bin_size_for_old_sensors':True
                      }
 superresolution_traces_1ap_pyr_low_resolution = utils_plot.calculate_superresolution_traces_for_all_sensors(ca_traces_dict_1ap_pyr,
                                                                                                              ca_traces_dict_by_cell_1ap_pyr,
                                                                                                              ca_wave_parameters,
                                                                                                              superres_parameters)
-#%% grand average
-import utils.utils_plot as utils_plot
-superresolution_traces = superresolution_traces_1ap_pyr_low_resolution
-
-fig_grand_average_traces_pyr = plt.figure()
-ax_grand_average = fig_grand_average_traces_pyr.add_subplot(1,1,1)
+#%
+from utils import utils_plot
+superres_parameters={'sensor_colors':sensor_colors,
+                     'normalize_raw_trace_offset':True,#set to 0
+                     'min_ap_per_apnum':10, # filters only cell-wise trace
+                     'bin_step_for_cells':1,
+                     'bin_size_for_cells':8,
+                     'bin_step':.5,
+                     'bin_size':2,
+                     'start_time':-50, # ms
+                     'end_time':500,#ms
+                     'traces_to_use':['f_corr','dff','f_corr_normalized'],
+                     'cell_wise_analysis':False,
+                     'dogaussian':True,
+                     'double_bin_size_for_old_sensors':True
+                     }
+superresolution_traces_1ap_pyr_high_resolution = utils_plot.calculate_superresolution_traces_for_all_sensors(ca_traces_dict_1ap_pyr,
+                                                                                                             ca_traces_dict_by_cell_1ap_pyr,
+                                                                                                             ca_wave_parameters,
+                                                                                                             superres_parameters)
+#%% grand averages
+from plot import manuscript_figures_core
 plot_parameters={'sensor_colors':sensor_colors,
-                 'start_time':-50, # ms
-                 'end_time':100,#ms
+                 'sensors':ca_wave_parameters['sensors'],
+                 'start_time':-50,#-50, # ms
+                 'end_time':500,#100,#ms
                  'trace_to_use':'dff',#'f_corr','dff','f_corr_normalized'
-                 'superresolution_function':'mean',#'mean',#'median'#'gauss'#
+                 'superresolution_function':'gauss',#'mean',#'median'#'gauss'#
                  'normalize_to_max':False,
                  'linewidth':3,
                  'error_bar':'none',#se,sd
+                 'figures_dir':figures_dir,
+                 'fig_name':'fig_grand_average_traces_pyr',
+                 'xscalesize':100,
+                 'yscalesize':10,
                  }
-for sensor in ca_wave_parameters['sensors']:
-    x = superresolution_traces[sensor]['{}_time'.format(plot_parameters['trace_to_use'])]
-    y = superresolution_traces[sensor]['{}_{}'.format(plot_parameters['trace_to_use'],plot_parameters['superresolution_function'])]
-    if plot_parameters['error_bar'] == 'sd':
-        error = superresolution_traces[sensor]['{}_sd'.format(plot_parameters['trace_to_use'])]
-    elif plot_parameters['error_bar'] == 'se':
-        error = superresolution_traces[sensor]['{}_sd'.format(plot_parameters['trace_to_use'])]/np.sqrt(superresolution_traces[sensor]['{}_n'.format(plot_parameters['trace_to_use'])])
-    else:
-        error =np.zeros(len(y))
-    if plot_parameters['normalize_to_max']:
-        error = error/np.nanmax(y)
-        y = y/np.nanmax(y)
-    color = plot_parameters['sensor_colors'][sensor]
-    ax_grand_average.plot(x,y,'-',color = color,linewidth = plot_parameters['linewidth'],alpha = 0.9)
-    if plot_parameters['error_bar'] != 'none':
-        ax_grand_average.fill_between(x, y-error, y+error,color =color,alpha = .3)
-ax_grand_average.set_xlim([plot_parameters['start_time'],plot_parameters['end_time']])
-ax_grand_average.plot(0,-.05,'r|',markersize = 18)
-utils_plot.add_scalebar_to_fig(ax_grand_average,
-                    axis = 'y',
-                    size = 10,
-                    conversion = 100,
-                    unit = r'dF/F%',
-                    color = 'black',
-                    location = 'top right',
-                    linewidth = 5)
-
-utils_plot.add_scalebar_to_fig(ax_grand_average,
-                    axis = 'x',
-                    size = 100,
-                    conversion = 1,
-                    unit = r'ms',
-                    color = 'black',
-                    location = 'top right',
-                    linewidth = 5)
-figfile = os.path.join(figures_dir,'fig_grand_average_traces_pyr.{}')
-fig_grand_average_traces_pyr.savefig(figfile.format('svg'))
-inkscape_cmd = ['/usr/bin/inkscape', '--file',figfile.format('svg'),'--export-emf', figfile.format('emf')]
-subprocess.run(inkscape_cmd )
-
+manuscript_figures_core.plot_superresolution_grand_averages(superresolution_traces_1ap_pyr_low_resolution,plot_parameters)
+plot_parameters={'sensor_colors':sensor_colors,
+                 'sensors':ca_wave_parameters['sensors'],
+                 'start_time':-20,#-50, # ms
+                 'end_time':100,#100,#ms
+                 'trace_to_use':'dff',#'f_corr','dff','f_corr_normalized'
+                 'superresolution_function':'gauss',#'mean',#'median'#'gauss'#
+                 'normalize_to_max':False,
+                 'linewidth':3,
+                 'error_bar':'none',#se,sd
+                 'figures_dir':figures_dir,
+                 'fig_name':'fig_grand_average_traces_pyr_zoom',
+                 'xscalesize':10,
+                 'yscalesize':10,
+                 }
+manuscript_figures_core.plot_superresolution_grand_averages(superresolution_traces_1ap_pyr_high_resolution,plot_parameters)
 #%% each cell separately
 superresolution_traces = superresolution_traces_1ap_pyr_low_resolution
 plot_parameters={'sensor_colors':sensor_colors,
                  'start_time':-50, # ms
                  'end_time':200,#ms
                  'trace_to_use':'dff',#'f_corr','dff','f_corr_normalized'
-                 'superresolution_function':'median',#'mean',#'median'#
+                 'superresolution_function':'gauss',#'mean',#'median'#
                  'normalize_to_max':False,
                  'linewidth':2,
                  'alpha':.5
@@ -207,6 +208,8 @@ for sensor_i,sensor in enumerate(ca_wave_parameters['sensors']):
     xs = superresolution_traces[sensor]['{}_time_per_cell'.format(plot_parameters['trace_to_use'])]
     ys = superresolution_traces[sensor]['{}_{}_per_cell'.format(plot_parameters['trace_to_use'],plot_parameters['superresolution_function'])]
     for x,y in zip(xs,ys):
+        if plot_parameters['normalize_to_max']:
+            y = y/np.max(y)
         ax_dict[sensor].plot(x,y,'-',color = color,linewidth = plot_parameters['linewidth'],alpha = plot_parameters['alpha'])
     ax_dict[sensor].set_xlim([plot_parameters['start_time'],plot_parameters['end_time']])
     ax_dict[sensor].axis('off')
@@ -236,10 +239,11 @@ wave_parameters = {'ap_num_to_plot':1,#ap_num_to_plot
                    'min_ap_per_apnum':10,
                    'trace_to_use':'dff',#'f','dff'
                    'function_to_use':'median',#'median'#'mean'
-                   'superresolution_function':'median',
+                   'superresolution_function':'mean',#'median',
                    'max_rise_time':100,#ms
                    }
-plot_parameters={'sensor_colors':sensor_colors}
+plot_parameters={'sensor_colors':sensor_colors,
+                 'partial_risetime_target':.8}
 ca_waves_dict = ca_waves_dict_pyr
 superresolution_traces = superresolution_traces_1ap_pyr_low_resolution
 amplitudes_all = list()
@@ -250,13 +254,15 @@ risetimes_all = list()
 risetimes_all_superresolution = list()
 half_decay_times_all = list()
 half_decay_times_all_superresolution = list()
-fig_scatter_plots_1ap = plt.figure(figsize = [10,10])
-ax_amplitude = fig_scatter_plots_1ap.add_subplot(3,2,1)
-ax_risetime = fig_scatter_plots_1ap.add_subplot(3,2,3)
-ax_half_decay_time= fig_scatter_plots_1ap.add_subplot(3,2,5)
-ax_amplitude_superres = fig_scatter_plots_1ap.add_subplot(3,2,2,sharey = ax_amplitude)
-ax_risetime_superres = fig_scatter_plots_1ap.add_subplot(3,2,4,sharey = ax_risetime)
-ax_half_decay_time_superres = fig_scatter_plots_1ap.add_subplot(3,2,6,sharey = ax_half_decay_time)
+partial_risetimes_all_superresolution = list()
+fig_scatter_plots_1ap = plt.figure(figsize = [10,15])
+ax_amplitude = fig_scatter_plots_1ap.add_subplot(4,2,1)
+ax_risetime = fig_scatter_plots_1ap.add_subplot(4,2,3)
+ax_half_decay_time= fig_scatter_plots_1ap.add_subplot(4,2,5)
+ax_amplitude_superres = fig_scatter_plots_1ap.add_subplot(4,2,2,sharey = ax_amplitude)
+ax_risetime_superres = fig_scatter_plots_1ap.add_subplot(4,2,4,sharey = ax_risetime)
+ax_half_decay_time_superres = fig_scatter_plots_1ap.add_subplot(4,2,6,sharey = ax_half_decay_time)
+ax_partial_risetime_superres = fig_scatter_plots_1ap.add_subplot(4,2,8)
 for sensor_i,sensor in enumerate(ca_wave_parameters['sensors']):
     sensor_amplitudes = list()
     sensor_rise_times = list()
@@ -264,6 +270,8 @@ for sensor_i,sensor in enumerate(ca_wave_parameters['sensors']):
     sensor_amplitudes_superresolution = list()
     sensor_rise_times_superresolution = list()
     sensor_half_decay_times_superresolution = list()
+    sensor_partial_rise_times_superresolution = list()
+    
     # each transient separately
     for ca_waves_dict_cell in ca_waves_dict[sensor]:
         needed_apnum_idx = np.where((ca_waves_dict_cell['event_num_per_ap']>=wave_parameters['min_ap_per_apnum']) & (ca_waves_dict_cell['ap_group_ap_num_mean_per_ap']==wave_parameters['ap_num_to_plot']))[0]
@@ -304,10 +312,14 @@ for sensor_i,sensor in enumerate(ca_wave_parameters['sensors']):
         peak_idx = np.argmax(y[idx_to_use])
         rise_time = x[idx_to_use][peak_idx]
         
+        
+        
         y_norm = (y-baseline)/amplitude
         half_decay_time_idx = np.argmax(y_norm[peak_idx:]<.5)+peak_idx
         half_decay_time = x[half_decay_time_idx]
         
+        partial_rise_time_idx = np.argmax(y_norm>plot_parameters['partial_risetime_target'])
+        partial_rise_time = x[partial_rise_time_idx]
         
         sensor_amplitudes_superresolution.append(amplitude)
         amplitudes_all_superresolution.append(amplitude)
@@ -315,15 +327,16 @@ for sensor_i,sensor in enumerate(ca_wave_parameters['sensors']):
         risetimes_all_superresolution.append(rise_time)
         sensor_half_decay_times_superresolution.append(half_decay_time)
         half_decay_times_all_superresolution.append(half_decay_time)
-    
+        
+        partial_risetimes_all_superresolution.append(partial_rise_time)
+        sensor_partial_rise_times_superresolution.append(partial_rise_time)
     
     
         
     ax_amplitude_superres.bar(sensor_i,np.median(sensor_amplitudes_superresolution),edgecolor = plot_parameters['sensor_colors'][sensor],fill=False,linewidth = 4)
     ax_risetime_superres.bar(sensor_i,np.median(sensor_rise_times_superresolution),edgecolor = plot_parameters['sensor_colors'][sensor],fill=False,linewidth = 4) 
     ax_half_decay_time_superres.bar(sensor_i,np.median(sensor_half_decay_times_superresolution),edgecolor = plot_parameters['sensor_colors'][sensor],fill=False,linewidth = 4) 
-    
-    
+    ax_partial_risetime_superres.bar(sensor_i,np.median(sensor_partial_rise_times_superresolution),edgecolor = plot_parameters['sensor_colors'][sensor],fill=False,linewidth = 4) 
 
 sns.swarmplot(x =amplitudes_idx_all,y = amplitudes_all,color='black',ax = ax_amplitude,alpha = .6)       
 sns.swarmplot(x =amplitudes_idx_all,y = risetimes_all,color='black',ax = ax_risetime,alpha = .6)    
@@ -338,7 +351,7 @@ ax_amplitude.set_ylabel('Amplitude (dF/F)')
 ax_amplitude.set_title('Calculated from single transients')
 ax_risetime.set_xticks(np.arange(len(ca_wave_parameters['sensors'])))
 ax_risetime.set_xticklabels(ca_wave_parameters['sensors'])  
-ax_risetime.set_ylabel('Rise time (ms)')
+ax_risetime.set_ylabel('Time to peak (ms)')
 #ax_risetime.set_title('Calculated from single transients')
 ax_half_decay_time.set_xticks(np.arange(len(ca_wave_parameters['sensors'])))
 ax_half_decay_time.set_xticklabels(ca_wave_parameters['sensors'])  
@@ -349,6 +362,7 @@ ax_half_decay_time.set_ylabel('Half decay time (ms)')
 sns.swarmplot(x =amplitudes_idx_all_superresolution,y = amplitudes_all_superresolution,color='black',ax = ax_amplitude_superres,alpha = .6)       
 sns.swarmplot(x =amplitudes_idx_all_superresolution,y = risetimes_all_superresolution,color='black',ax = ax_risetime_superres,alpha = .6)    
 sns.swarmplot(x =amplitudes_idx_all_superresolution,y = half_decay_times_all_superresolution,color='black',ax = ax_half_decay_time_superres,alpha = .6)  
+sns.swarmplot(x =amplitudes_idx_all_superresolution,y = partial_risetimes_all_superresolution,color='black',ax = ax_partial_risetime_superres,alpha = .6)  
 
 for sensor_i,sensor in enumerate(ca_wave_parameters['sensors']):
     # calculate from main superresolution trace
@@ -363,10 +377,13 @@ for sensor_i,sensor in enumerate(ca_wave_parameters['sensors']):
     y_norm = (y-baseline)/amplitude
     half_decay_time_idx = np.argmax(y_norm[peak_idx:]<.5)+peak_idx
     half_decay_time = x[half_decay_time_idx]
+    partial_rise_time_idx = np.argmax(y_norm>plot_parameters['partial_risetime_target'])
+    partial_rise_time = x[partial_rise_time_idx]
     
     ax_amplitude_superres.plot(sensor_i,amplitude,'_',color = plot_parameters['sensor_colors'][sensor], markersize = 35,markeredgewidth = 3)
     ax_risetime_superres.plot(sensor_i,rise_time,'_',color = plot_parameters['sensor_colors'][sensor], markersize = 35,markeredgewidth = 3)
     ax_half_decay_time_superres.plot(sensor_i,half_decay_time,'_',color = plot_parameters['sensor_colors'][sensor], markersize = 35,markeredgewidth = 3)
+    ax_partial_risetime_superres.plot(sensor_i,partial_rise_time,'_',color = plot_parameters['sensor_colors'][sensor], markersize = 35,markeredgewidth = 3)
 
 ax_amplitude_superres.set_xticks(np.arange(len(ca_wave_parameters['sensors'])))
 ax_amplitude_superres.set_xticklabels(ca_wave_parameters['sensors'])    
@@ -374,7 +391,12 @@ ax_amplitude_superres.set_ylabel('Amplitude (dF/F)')
 ax_amplitude_superres.set_title('Calculated from superresolution traces')
 ax_risetime_superres.set_xticks(np.arange(len(ca_wave_parameters['sensors'])))
 ax_risetime_superres.set_xticklabels(ca_wave_parameters['sensors'])  
-ax_risetime_superres.set_ylabel('Rise time (ms)')
+ax_risetime_superres.set_ylabel('Time to peak (ms)')
+
+
+ax_partial_risetime_superres.set_xticks(np.arange(len(ca_wave_parameters['sensors'])))
+ax_partial_risetime_superres.set_xticklabels(ca_wave_parameters['sensors'])  
+ax_partial_risetime_superres.set_ylabel('0-{:.0f}% risetime (ms)'.format(plot_parameters['partial_risetime_target']*100))
 #ax_risetime_superres.set_title('Calculated from superresolution traces')
 
 ax_half_decay_time_superres.set_xticks(np.arange(len(ca_wave_parameters['sensors'])))
@@ -382,7 +404,7 @@ ax_half_decay_time_superres.set_xticklabels(ca_wave_parameters['sensors'])
 ax_half_decay_time_superres.set_ylabel('Half decay time (ms)')
 #ax_half_decay_time_superres.set_title('Calculated from superresolution traces')
     #break
-        
+ #%     
 figfile = os.path.join(figures_dir,'fig_amplitude_rise_time_scatter_pyr_1ap.{}')
 fig_scatter_plots_1ap.savefig(figfile.format('svg'))
 inkscape_cmd = ['/usr/bin/inkscape', '--file',figfile.format('svg'),'--export-emf', figfile.format('emf')]
@@ -390,126 +412,130 @@ subprocess.run(inkscape_cmd )
     
 
 #%%
-#%% calculate superresolution traces - high resolution for rise times and a low resolution for amplitudes
-superres_parameters={'normalize_raw_trace_offset':True,#set to 0
-                     'min_ap_per_apnum':5,
-                     'bin_step_for_cells':1,
-                     'bin_size_for_cells':4,
-                     'bin_step':.5,
-                     'bin_size':4,#8
-                     'start_time':-50, # ms
-                     'end_time':1000,#ms
-                     'traces_to_use':['f_corr','dff','f_corr_normalized'],
-                     'cell_wise_analysis':False,
-                     }
-superresolution_traces_1ap_pyr_high_resolution = utils_plot.calculate_superresolution_traces_for_all_sensors(ca_traces_dict_1ap_pyr,
-                                                                                                             ca_traces_dict_by_cell_1ap_pyr,
-                                                                                                             ca_wave_parameters,
-                                                                                                             superres_parameters)
-
-
-#%% grand average - high resolution - rise time
-import utils.utils_plot as utils_plot
-
-
-fig_grand_average_traces_pyr_highres = plt.figure(figsize = [5,10])
-ax_grand_average = fig_grand_average_traces_pyr_highres.add_subplot(2,1,1)
-ax_grand_average_normalized = fig_grand_average_traces_pyr_highres.add_subplot(2,1,2)
-plot_parameters={'sensor_colors':sensor_colors,
-                 'low_res_sensors':[],#'GCaMP7F', 'XCaMPgf', '456', '686', '688'
-                 'start_time':-10, # ms
-                 'end_time':50,#ms
-                 'trace_to_use':'dff',#'f_corr','dff','f_corr_normalized'
-                 'trace_to_use_2':'dff',
-                 'superresolution_function':'mean',#'mean',#'median'#
-                 'normalize_to_max':False,
-                 'normalize_to_max_2':True,
-                 'linewidth':3,
-                 'error_bar':'none',#se,sd
-                 }
-for sensor in ca_wave_parameters['sensors']:
-    if sensor in plot_parameters['low_res_sensors']:
-        superresolution_traces = superresolution_traces_1ap_pyr_low_resolution
-    else:
-        superresolution_traces = superresolution_traces_1ap_pyr_high_resolution
-    x = superresolution_traces[sensor]['{}_time'.format(plot_parameters['trace_to_use'])]
-    y = superresolution_traces[sensor]['{}_{}'.format(plot_parameters['trace_to_use'],plot_parameters['superresolution_function'])]
-    if plot_parameters['error_bar'] == 'sd':
-        error = superresolution_traces[sensor]['{}_sd'.format(plot_parameters['trace_to_use'])]
-    elif plot_parameters['error_bar'] == 'se':
-        error = superresolution_traces[sensor]['{}_sd'.format(plot_parameters['trace_to_use'])]/np.sqrt(superresolution_traces[sensor]['{}_n'.format(plot_parameters['trace_to_use'])])
-    else:
-        error =np.zeros(len(y))
-    if plot_parameters['normalize_to_max']:
-        error = error/np.nanmax(y)
-        y = y/np.nanmax(y)
-    color = plot_parameters['sensor_colors'][sensor]
-    ax_grand_average.plot(x,y,'-',color = color,linewidth = plot_parameters['linewidth'],alpha = 0.8)
-    if plot_parameters['error_bar'] != 'none':
-        ax_grand_average.fill_between(x, y-error, y+error,color =color,alpha = .3)
-ax_grand_average.set_xlim([plot_parameters['start_time'],plot_parameters['end_time']])
-ax_grand_average.plot(0,-.05,'r|',markersize = 18)
-utils_plot.add_scalebar_to_fig(ax_grand_average,
-                    axis = 'y',
-                    size = 10,
-                    conversion = 100,
-                    unit = r'dF/F%',
-                    color = 'black',
-                    location = 'top left',
-                    linewidth = 5)
-
-utils_plot.add_scalebar_to_fig(ax_grand_average,
-                    axis = 'x',
-                    size = 10,
-                    conversion = 1,
-                    unit = r'ms',
-                    color = 'black',
-                    location = 'top left',
-                    linewidth = 5)
-
-for sensor in ca_wave_parameters['sensors']:
-    if sensor in plot_parameters['low_res_sensors']:
-        superresolution_traces = superresolution_traces_1ap_pyr_low_resolution
-    else:
-        superresolution_traces = superresolution_traces_1ap_pyr_high_resolution
-    x = superresolution_traces[sensor]['{}_time'.format(plot_parameters['trace_to_use_2'])]
-    y = superresolution_traces[sensor]['{}_{}'.format(plot_parameters['trace_to_use_2'],plot_parameters['superresolution_function'])]
-    if plot_parameters['error_bar'] == 'sd':
-        error = superresolution_traces[sensor]['{}_sd'.format(plot_parameters['trace_to_use_2'])]
-    elif plot_parameters['error_bar'] == 'se':
-        error = superresolution_traces[sensor]['{}_sd'.format(plot_parameters['trace_to_use_2'])]/np.sqrt(superresolution_traces[sensor]['{}_n'.format(plot_parameters['trace_to_use_2'])])
-    else:
-        error =np.zeros(len(y))
-    if plot_parameters['normalize_to_max_2']:
-        error = error/np.nanmax(y)
-        y = y/np.nanmax(y)
-    color = plot_parameters['sensor_colors'][sensor]
-    ax_grand_average_normalized.plot(x,y,'-',color = color,linewidth = plot_parameters['linewidth'],alpha = 0.8)
-    if plot_parameters['error_bar'] != 'none':
-        ax_grand_average_normalized.fill_between(x, y-error, y+error,color =color,alpha = .3)
-ax_grand_average_normalized.set_xlim([plot_parameters['start_time'],plot_parameters['end_time']])
-ax_grand_average_normalized.plot(0,-.05,'r|',markersize = 18)
-utils_plot.add_scalebar_to_fig(ax_grand_average_normalized,
-                    axis = 'y',
-                    size = 10,
-                    conversion = 100,
-                    unit = r'%',
-                    color = 'black',
-                    location = 'top left',
-                    linewidth = 5)
-
-utils_plot.add_scalebar_to_fig(ax_grand_average_normalized,
-                    axis = 'x',
-                    size = 10,
-                    conversion = 1,
-                    unit = r'ms',
-                    color = 'black',
-                    location = 'top left',
-                    linewidth = 5)
-figfile = os.path.join(figures_dir,'fig_average_onset_pyr.{}')
-fig_grand_average_traces_pyr_highres.savefig(figfile.format('svg'))
-inkscape_cmd = ['/usr/bin/inkscape', '--file',figfile.format('svg'),'--export-emf', figfile.format('emf')]
-subprocess.run(inkscape_cmd )
+# =============================================================================
+# #%% calculate superresolution traces - high resolution for rise times and a low resolution for amplitudes
+# superres_parameters={'normalize_raw_trace_offset':True,#set to 0
+#                      'min_ap_per_apnum':5,
+#                      'bin_step_for_cells':1,
+#                      'bin_size_for_cells':4,
+#                      'bin_step':.5,
+#                      'bin_size':4,#8
+#                      'start_time':-50, # ms
+#                      'end_time':1000,#ms
+#                      'traces_to_use':['f_corr','dff','f_corr_normalized'],
+#                      'cell_wise_analysis':False,
+#                      'dogaussian':True,
+#                      'double_bin_size_for_old_sensors':False,
+#                      }
+# superresolution_traces_1ap_pyr_high_resolution = utils_plot.calculate_superresolution_traces_for_all_sensors(ca_traces_dict_1ap_pyr,
+#                                                                                                              ca_traces_dict_by_cell_1ap_pyr,
+#                                                                                                              ca_wave_parameters,
+#                                                                                                              superres_parameters)
+# 
+# 
+# #%% grand average - high resolution - rise time
+# import utils.utils_plot as utils_plot
+# 
+# 
+# fig_grand_average_traces_pyr_highres = plt.figure(figsize = [5,10])
+# ax_grand_average = fig_grand_average_traces_pyr_highres.add_subplot(2,1,1)
+# ax_grand_average_normalized = fig_grand_average_traces_pyr_highres.add_subplot(2,1,2)
+# plot_parameters={'sensor_colors':sensor_colors,
+#                  'low_res_sensors':[],#'GCaMP7F', 'XCaMPgf', '456', '686', '688'
+#                  'start_time':-10, # ms
+#                  'end_time':50,#ms
+#                  'trace_to_use':'dff',#'f_corr','dff','f_corr_normalized'
+#                  'trace_to_use_2':'dff',
+#                  'superresolution_function':'mean',#'mean',#'median'#
+#                  'normalize_to_max':False,
+#                  'normalize_to_max_2':True,
+#                  'linewidth':3,
+#                  'error_bar':'none',#se,sd
+#                  }
+# for sensor in ca_wave_parameters['sensors']:
+#     if sensor in plot_parameters['low_res_sensors']:
+#         superresolution_traces = superresolution_traces_1ap_pyr_low_resolution
+#     else:
+#         superresolution_traces = superresolution_traces_1ap_pyr_high_resolution
+#     x = superresolution_traces[sensor]['{}_time'.format(plot_parameters['trace_to_use'])]
+#     y = superresolution_traces[sensor]['{}_{}'.format(plot_parameters['trace_to_use'],plot_parameters['superresolution_function'])]
+#     if plot_parameters['error_bar'] == 'sd':
+#         error = superresolution_traces[sensor]['{}_sd'.format(plot_parameters['trace_to_use'])]
+#     elif plot_parameters['error_bar'] == 'se':
+#         error = superresolution_traces[sensor]['{}_sd'.format(plot_parameters['trace_to_use'])]/np.sqrt(superresolution_traces[sensor]['{}_n'.format(plot_parameters['trace_to_use'])])
+#     else:
+#         error =np.zeros(len(y))
+#     if plot_parameters['normalize_to_max']:
+#         error = error/np.nanmax(y)
+#         y = y/np.nanmax(y)
+#     color = plot_parameters['sensor_colors'][sensor]
+#     ax_grand_average.plot(x,y,'-',color = color,linewidth = plot_parameters['linewidth'],alpha = 0.8)
+#     if plot_parameters['error_bar'] != 'none':
+#         ax_grand_average.fill_between(x, y-error, y+error,color =color,alpha = .3)
+# ax_grand_average.set_xlim([plot_parameters['start_time'],plot_parameters['end_time']])
+# ax_grand_average.plot(0,-.05,'r|',markersize = 18)
+# utils_plot.add_scalebar_to_fig(ax_grand_average,
+#                     axis = 'y',
+#                     size = 10,
+#                     conversion = 100,
+#                     unit = r'dF/F%',
+#                     color = 'black',
+#                     location = 'top left',
+#                     linewidth = 5)
+# 
+# utils_plot.add_scalebar_to_fig(ax_grand_average,
+#                     axis = 'x',
+#                     size = 10,
+#                     conversion = 1,
+#                     unit = r'ms',
+#                     color = 'black',
+#                     location = 'top left',
+#                     linewidth = 5)
+# 
+# for sensor in ca_wave_parameters['sensors']:
+#     if sensor in plot_parameters['low_res_sensors']:
+#         superresolution_traces = superresolution_traces_1ap_pyr_low_resolution
+#     else:
+#         superresolution_traces = superresolution_traces_1ap_pyr_high_resolution
+#     x = superresolution_traces[sensor]['{}_time'.format(plot_parameters['trace_to_use_2'])]
+#     y = superresolution_traces[sensor]['{}_{}'.format(plot_parameters['trace_to_use_2'],plot_parameters['superresolution_function'])]
+#     if plot_parameters['error_bar'] == 'sd':
+#         error = superresolution_traces[sensor]['{}_sd'.format(plot_parameters['trace_to_use_2'])]
+#     elif plot_parameters['error_bar'] == 'se':
+#         error = superresolution_traces[sensor]['{}_sd'.format(plot_parameters['trace_to_use_2'])]/np.sqrt(superresolution_traces[sensor]['{}_n'.format(plot_parameters['trace_to_use_2'])])
+#     else:
+#         error =np.zeros(len(y))
+#     if plot_parameters['normalize_to_max_2']:
+#         error = error/np.nanmax(y)
+#         y = y/np.nanmax(y)
+#     color = plot_parameters['sensor_colors'][sensor]
+#     ax_grand_average_normalized.plot(x,y,'-',color = color,linewidth = plot_parameters['linewidth'],alpha = 0.8)
+#     if plot_parameters['error_bar'] != 'none':
+#         ax_grand_average_normalized.fill_between(x, y-error, y+error,color =color,alpha = .3)
+# ax_grand_average_normalized.set_xlim([plot_parameters['start_time'],plot_parameters['end_time']])
+# ax_grand_average_normalized.plot(0,-.05,'r|',markersize = 18)
+# utils_plot.add_scalebar_to_fig(ax_grand_average_normalized,
+#                     axis = 'y',
+#                     size = 10,
+#                     conversion = 100,
+#                     unit = r'%',
+#                     color = 'black',
+#                     location = 'top left',
+#                     linewidth = 5)
+# 
+# utils_plot.add_scalebar_to_fig(ax_grand_average_normalized,
+#                     axis = 'x',
+#                     size = 10,
+#                     conversion = 1,
+#                     unit = r'ms',
+#                     color = 'black',
+#                     location = 'top left',
+#                     linewidth = 5)
+# figfile = os.path.join(figures_dir,'fig_average_onset_pyr.{}')
+# fig_grand_average_traces_pyr_highres.savefig(figfile.format('svg'))
+# inkscape_cmd = ['/usr/bin/inkscape', '--file',figfile.format('svg'),'--export-emf', figfile.format('emf')]
+# subprocess.run(inkscape_cmd )
+# =============================================================================
 #%%
 #%% download sensor kinetics for 2 AP
 wave_parameters = {'ap_num_to_plot':2,#ap_num_to_plot
@@ -521,7 +547,7 @@ ca_traces_dict_2ap_pyr,ca_traces_dict_by_cell_2ap_pyr  = utils_plot.collect_ca_w
 #%% 2 AP kinetics
 plot_parameters={'trace_to_use':'dff',#'f_corr','dff','f_corr_normalized'
                  'trace_to_use_2':'dff',
-                 'superresolution_function':'mean',#'mean',#'median'#'gauss'
+                 'superresolution_function':'gauss',#'mean',#'median'#'gauss'
                  'normalize_to_max':True,
                  'linewidth':3
                  }
@@ -544,8 +570,8 @@ start_time = -25
 end_time = 100
 min_event_number = 20
 exclude_outliers = False
-sensors_to_plot = ['456','686','688']
-slow_sensors = ['GCaMP7F', 'XCaMPgf']
+sensors_to_plot = ['GCaMP7F','456','686','688']
+slow_sensors = ['GCaMP7F']#'XCaMPgf'
 axs_merged['slow_sensors']=fig_merged.add_subplot(2*len(sensors_to_plot)+1,1,1)
 
 for sensor in slow_sensors:
