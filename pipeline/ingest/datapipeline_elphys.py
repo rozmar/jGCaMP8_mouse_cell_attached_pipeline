@@ -26,9 +26,11 @@ def populatemytables_core_paralel(arguments,runround):
     elif runround ==3:
         ephysanal_cell_attached.SweepAPQC().populate(**arguments)
         pass
-        ephysanal_cell_attached.CellSpikeParameters().populate(**arguments)
+        #ephysanal_cell_attached.CellSpikeParameters().populate(**arguments)
         ephysanal_cell_attached.IngestAPGroup().populate(**arguments)
+        ephysanal_cell_attached.IngestAPDoublet().populate(**arguments)
     elif runround == 4:
+        ephysanal_cell_attached.EphysCellType().populate(**arguments)
         ephysanal_cell_attached.IngestAPGroupTrace().populate(**arguments)
         
 
@@ -41,9 +43,11 @@ def populatemytables_core(arguments,runround):
     elif runround ==3:
         ephysanal_cell_attached.SweepAPQC().populate(**arguments)
         pass
-        ephysanal_cell_attached.CellSpikeParameters().populate(**arguments)
+        #ephysanal_cell_attached.CellSpikeParameters().populate(**arguments)
         ephysanal_cell_attached.IngestAPGroup().populate(**arguments)
+        ephysanal_cell_attached.IngestAPDoublet().populate(**arguments)
     elif runround == 4:
+        ephysanal_cell_attached.EphysCellType().populate(**arguments)
         ephysanal_cell_attached.IngestAPGroupTrace().populate(**arguments)
 
     

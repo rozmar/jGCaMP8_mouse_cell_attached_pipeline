@@ -77,7 +77,7 @@ def generate_superresolution_trace(x_conc,y_conc,bin_step,bin_size,function = 'm
         bin_n.append(np.sum(idxes))
         if  dogaussian:
             idxes_gauss = (x_conc>bin_center-bin_size) & (x_conc<bin_center+bin_size)
-            gauss_f = stats.norm(bin_center,bin_size/5)
+            gauss_f = stats.norm(bin_center,bin_size/4)
             gauss_w = gauss_f.pdf(x_conc[idxes_gauss])
             gauss_w = gauss_w/sum(gauss_w)
             bin_gauss.append(np.sum(y_conc[idxes_gauss]*gauss_w))
@@ -210,12 +210,13 @@ def collect_ca_wave_parameters(ca_wave_parameters,cawave_properties_needed,ephys
     ephys_hwstd_cond = 'sweep_ap_hw_std_per_median<={}'.format(ca_wave_parameters['max_sweep_ap_hw_std_per_median'])
     recording_mode_cond = 'recording_mode = "{}"'.format(ca_wave_parameters['ephys_recording_mode'])
     baseline_f_cond = 'cawave_baseline_f > {}'.format(ca_wave_parameters['minimum_f0_value'])
+    channel_offset_cond = 'channel_offset > {}'.format(ca_wave_parameters['min_channel_offset'])
     #cawaves_all = imaging_gt.SessionCalciumSensor()*ephysanal_cell_attached.APGroup()*imaging_gt.CalciumWave.CalciumWaveProperties()
     ca_waves_dict = dict()
     for sensor in ca_wave_parameters['sensors']:
         print(sensor)
         key['session_calcium_sensor'] = sensor
-        cawaves_all = imaging_gt.SessionROIFPercentile()*ephysanal_cell_attached.SweepAPQC()*ephysanal_cell_attached.CellSpikeParameters()*imaging_gt.ROIDwellTime()*imaging.ROI()*imaging.MoviePowerPostObjective()*imaging.MovieMetaData()*imaging.MovieNote()*imaging_gt.SessionCalciumSensor()*ephysanal_cell_attached.APGroup()*imaging_gt.CalciumWave.CalciumWaveProperties()*imaging_gt.CalciumWave()*imaging_gt.CalciumWave.CalciumWaveNeuropil()&'movie_note_type = "quality"'
+        cawaves_all = imaging.MovieChannel()*imaging_gt.SessionROIFPercentile()*ephysanal_cell_attached.SweepAPQC()*ephysanal_cell_attached.CellSpikeParameters()*imaging_gt.ROIDwellTime()*imaging.ROI()*imaging.MoviePowerPostObjective()*imaging.MovieMetaData()*imaging.MovieNote()*imaging_gt.SessionCalciumSensor()*ephysanal_cell_attached.APGroup()*imaging_gt.CalciumWave.CalciumWaveProperties()*imaging_gt.CalciumWave()*imaging_gt.CalciumWave.CalciumWaveNeuropil()&'movie_note_type = "quality"'
         cellwave_by_cell_list = list()
         for cellkey in ephys_cell_attached.Cell():
 # =============================================================================
@@ -224,7 +225,7 @@ def collect_ca_wave_parameters(ca_wave_parameters,cawave_properties_needed,ephys
 #             for data,data_name in zip(ephys_properties_list,ephys_properties_needed):
 #                 cell_ephys_data[data_name] = data 
 # =============================================================================
-            cawaves = cawaves_all& key & snr_cond & preisi_cond & postisi_cond & basline_dff_cond & basline_dff_cond_2 &ephys_snr_cond & ephys_hwstd_cond & cellkey  &recording_mode_cond&baseline_f_cond
+            cawaves = cawaves_all& key & snr_cond & preisi_cond & postisi_cond & basline_dff_cond & basline_dff_cond_2 &ephys_snr_cond & ephys_hwstd_cond & cellkey  &recording_mode_cond&baseline_f_cond & channel_offset_cond
             if ca_wave_parameters['only_manually_labelled_movies']:
                 cawaves = cawaves&'movie_note = "1"'
             if len(cawaves) == 0:
@@ -267,7 +268,7 @@ def collect_ca_wave_parameters(ca_wave_parameters,cawave_properties_needed,ephys
         ca_waves_dict[sensor] = cellwave_by_cell_list
     return(ca_waves_dict)
     
-def collect_ca_wave_traces( ca_wave_parameters,ca_waves_dict,parameters   ):
+def collect_ca_wave_traces( ca_wave_parameters,ca_waves_dict,parameters,use_doublets = False   ):
     ca_traces_dict = dict()
     ca_traces_dict_by_cell = dict()
     for sensor in ca_wave_parameters['sensors']:
@@ -295,8 +296,12 @@ def collect_ca_wave_traces( ca_wave_parameters,ca_waves_dict,parameters   ):
         ephys_snr_cond = 'sweep_ap_snr_dv_median>={}'.format(ca_wave_parameters['min_sweep_ap_snr_dv_median'])
         ephys_hwstd_cond = 'sweep_ap_hw_std_per_median<={}'.format(ca_wave_parameters['max_sweep_ap_hw_std_per_median'])
         baseline_f_cond = 'cawave_baseline_f > {}'.format(ca_wave_parameters['minimum_f0_value'])
-
-        cawaves_all = ephysanal_cell_attached.SweepAPQC()*imaging_gt.ROIDwellTime()*imaging.ROI()*imaging.MoviePowerPostObjective()*imaging.MovieMetaData()*imaging.MovieNote()*imaging_gt.SessionCalciumSensor()*ephysanal_cell_attached.APGroup()*imaging_gt.CalciumWave.CalciumWaveProperties()*imaging_gt.CalciumWave()*imaging_gt.CalciumWave.CalciumWaveNeuropil()&'movie_note_type = "quality"'
+        channel_offset_cond = 'channel_offset > {}'.format(ca_wave_parameters['min_channel_offset'])
+        
+        if use_doublets:
+            cawaves_all = imaging.MovieChannel()*ephysanal_cell_attached.SweepAPQC()*imaging_gt.ROIDwellTime()*imaging.ROI()*imaging.MoviePowerPostObjective()*imaging.MovieMetaData()*imaging.MovieNote()*imaging_gt.SessionCalciumSensor()*ephysanal_cell_attached.APDoublet()*imaging_gt.CalciumWave.DoubletCalciumWaveProperties()*imaging_gt.DoubletCalciumWave()*imaging_gt.DoubletCalciumWave.DoubletCalciumWaveNeuropil()&'movie_note_type = "quality"'
+        else:
+            cawaves_all = imaging.MovieChannel()*ephysanal_cell_attached.SweepAPQC()*imaging_gt.ROIDwellTime()*imaging.ROI()*imaging.MoviePowerPostObjective()*imaging.MovieMetaData()*imaging.MovieNote()*imaging_gt.SessionCalciumSensor()*ephysanal_cell_attached.APGroup()*imaging_gt.CalciumWave.CalciumWaveProperties()*imaging_gt.CalciumWave()*imaging_gt.CalciumWave.CalciumWaveNeuropil()&'movie_note_type = "quality"'
     
         cellwave_by_cell_list = np.asarray(ca_waves_dict[sensor])
         cellvals = list()
@@ -316,7 +321,7 @@ def collect_ca_wave_traces( ca_wave_parameters,ca_waves_dict,parameters   ):
             if 'ignore_cells_below_median_snr' in parameters.keys():
                 if parameters['ignore_cells_below_median_snr'] and cellval<np.nanmedian(cellvals): # restriction for only SNR above median
                     continue
-            cawaves = cawaves_all& key & snr_cond & preisi_cond & postisi_cond & basline_dff_cond & basline_dff_cond_2 & ephys_snr_cond & ephys_hwstd_cond & cell_data['cell_key']  &baseline_f_cond
+            cawaves = cawaves_all& key & snr_cond & preisi_cond & postisi_cond & basline_dff_cond & basline_dff_cond_2 & ephys_snr_cond & ephys_hwstd_cond & cell_data['cell_key']  &baseline_f_cond & channel_offset_cond
             if ca_wave_parameters['only_manually_labelled_movies']:
                 cawaves = cawaves&'movie_note = "1"'
             if len(cawaves) == 0:
@@ -329,7 +334,11 @@ def collect_ca_wave_traces( ca_wave_parameters,ca_waves_dict,parameters   ):
             cawave_ap_group_length_list = list()
             cawave_snr_list = list()
             cawave_f_corr_normalized_list = list()
-            cawave_fs,cawave_times,cawave_fneus,cawave_f0s,cawave_rneus,ap_group_start_time,ap_group_end_time,cawave_snrs,cawave_peak_amplitude_fs,cawave_peak_amplitude_dffs = (cawaves&'ap_group_ap_num={}'.format(parameters['ap_num_to_plot'])).fetch('cawave_f','cawave_time','cawave_fneu','cawave_baseline_f','cawave_rneu','ap_group_start_time','ap_group_end_time','cawave_snr','cawave_peak_amplitude_f','cawave_peak_amplitude_dff')
+            if use_doublets:
+                cawave_fs,cawave_times,cawave_fneus,cawave_f0s,cawave_rneus,ap_group_start_time,ap_group_length,cawave_snrs,cawave_peak_amplitude_fs,cawave_peak_amplitude_dffs = (cawaves&'ap_group_ap_num={}'.format(parameters['ap_num_to_plot'])).fetch('doublet_cawave_f','doublet_cawave_time','doublet_cawave_fneu','doublet_awave_baseline_f','doublet_cawave_rneu','ap_doublet_start_time','ap_doublet_length','doublet_cawave_snr','doublet_cawave_peak_amplitude_f','doublet_cawave_peak_amplitude_dff')
+                ap_group_end_time = np.asarray(ap_group_start_time,float)+np.asarray(ap_group_length,float)
+            else:
+                cawave_fs,cawave_times,cawave_fneus,cawave_f0s,cawave_rneus,ap_group_start_time,ap_group_end_time,cawave_snrs,cawave_peak_amplitude_fs,cawave_peak_amplitude_dffs = (cawaves&'ap_group_ap_num={}'.format(parameters['ap_num_to_plot'])).fetch('cawave_f','cawave_time','cawave_fneu','cawave_baseline_f','cawave_rneu','ap_group_start_time','ap_group_end_time','cawave_snr','cawave_peak_amplitude_f','cawave_peak_amplitude_dff')
             ap_group_lengths = np.asarray(ap_group_end_time,float)-np.asarray(ap_group_start_time,float)
             for cawave_f,cawave_time,cawave_fneu,cawave_f0,cawave_rneu,ap_group_length,cawave_snr,cawave_peak_amplitude_f in zip(cawave_fs,cawave_times,cawave_fneus,cawave_f0s,cawave_rneus,ap_group_lengths,cawave_snrs,cawave_peak_amplitude_fs ):
                 cawave_f_corr = cawave_f-cawave_fneu*cawave_rneu-cawave_f0
@@ -379,7 +388,10 @@ def calculate_superresolution_traces_for_all_sensors(ca_traces_dict,ca_traces_di
             needed_idx = (x_conc>=plot_parameters['start_time']-plot_parameters['bin_size'])&(x_conc<=plot_parameters['end_time']+plot_parameters['bin_size'])
             x_conc = x_conc[needed_idx]
             y_conc = y_conc[needed_idx]
-            trace_dict = generate_superresolution_trace(x_conc,y_conc,plot_parameters['bin_step'],plot_parameters['bin_size'],function = 'all', dogaussian = plot_parameters['dogaussian']) 
+            if plot_parameters['double_bin_size_for_old_sensors'] and ('gcamp7f' in sensor or 'xcamp' in sensor):
+                trace_dict = generate_superresolution_trace(x_conc,y_conc,plot_parameters['bin_step'],plot_parameters['bin_size']*3,function = 'all', dogaussian = plot_parameters['dogaussian']) 
+            else:
+                trace_dict = generate_superresolution_trace(x_conc,y_conc,plot_parameters['bin_step'],plot_parameters['bin_size'],function = 'all', dogaussian = plot_parameters['dogaussian']) 
             x = np.asarray(trace_dict['bin_centers'])
             y_mean = np.asarray(trace_dict['trace_mean'])
             y_median = np.asarray(trace_dict['trace_median'])
@@ -417,7 +429,10 @@ def calculate_superresolution_traces_for_all_sensors(ca_traces_dict,ca_traces_di
                         needed_idx = (x_conc>=plot_parameters['start_time']-plot_parameters['bin_size'])&(x_conc<=plot_parameters['end_time']+plot_parameters['bin_size'])
                         x_conc = x_conc[needed_idx]
                         y_conc = y_conc[needed_idx]
-                        trace_dict = generate_superresolution_trace(x_conc,y_conc,plot_parameters['bin_step'],plot_parameters['bin_size'],function = 'all', dogaussian = plot_parameters['dogaussian']) 
+                        if plot_parameters['double_bin_size_for_old_sensors'] and ('gcamp7f' in sensor or 'xcamp' in sensor):
+                            trace_dict = generate_superresolution_trace(x_conc,y_conc,plot_parameters['bin_step'],plot_parameters['bin_size']*3,function = 'all', dogaussian = plot_parameters['dogaussian']) 
+                        else:
+                            trace_dict = generate_superresolution_trace(x_conc,y_conc,plot_parameters['bin_step'],plot_parameters['bin_size'],function = 'all', dogaussian = plot_parameters['dogaussian']) 
                         x = np.asarray(trace_dict['bin_centers'])
                         y_mean = np.asarray(trace_dict['trace_mean'])
                         y_median = np.asarray(trace_dict['trace_median'])

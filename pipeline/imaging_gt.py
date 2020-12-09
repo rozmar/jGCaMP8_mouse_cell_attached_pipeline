@@ -16,6 +16,7 @@ def gaussFilter(sig,sRate,sigma = .00005):
     sig_f = ndimage.gaussian_filter(sig,sigma/si)
     return sig_f
 #%%
+
 @schema
 class MovieDepth(dj.Computed):
     definition = """
@@ -414,7 +415,7 @@ class IngestCalciumWave(dj.Computed):
         ca_wave_time_back_for_baseline = .2
         ca_wave_time_forward = 3
         global_f0_time = 10 #seconds
-        max_rise_time = .02 #seconds to find maximum after last AP in a group # 0.1 for pyr
+        max_rise_time = .08 #seconds to find maximum after last AP in a group # 0.1 for pyr
         gaussian_filter_sigmas = CalciumWaveFilter().fetch('gaussian_filter_sigma')#imaging_gt.
         neuropil_subtractions = CalciumWaveNeuropilHandling().fetch('neuropil_subtraction')#imaging_gt.
         groundtruth_rois = ROISweepCorrespondance()&key#imaging_gt.
@@ -559,4 +560,203 @@ class IngestCalciumWave(dj.Computed):
         CalciumWave.CalciumWaveProperties().insert(calcium_wave_properties_list, allow_direct_insert=True)#imaging_gt.
         key['cawave_complete'] = 1
         self.insert1(key,skip_duplicates=True)
-    
+#%%
+        
+        
+        
+@schema
+class DoubletCalciumWave(dj.Imported):
+    definition = """
+    -> ROISweepCorrespondance
+    -> ephysanal_cell_attached.APDoublet
+    -> imaging.MovieChannel # separately for the two channels..
+    ---
+    doublet_cawave_f       : blob # raw f
+    doublet_cawave_time    : blob # seconds
+    """
+    class DoubletCalciumWaveNeuropil(dj.Part):
+        definition = """
+        -> master
+        -> imaging.ROINeuropil # so ROI and neuropil is also included - neuropil can be different
+        ---
+        doublet_cawave_fneu    : blob # raw f
+        """
+    class DoubletCalciumWaveProperties(dj.Part):
+        definition = """
+        -> master
+        -> imaging.ROINeuropil # so ROI and neuropil is also included - neuropil can be different
+        -> CalciumWaveNeuropilHandling
+        -> CalciumWaveFilter
+        ---
+        doublet_cawave_rneu                : double
+        doublet_cawave_baseline_f          : double
+        doublet_cawave_baseline_f_std      : double
+        doublet_cawave_baseline_dff_global : double
+        doublet_cawave_peak_amplitude_f    : double
+        doublet_cawave_peak_amplitude_dff  : double
+        doublet_cawave_rise_time           : double
+        doublet_cawave_snr                 : double
+        doublet_cawave_half_decay_time     : double # peak to half peak time
+        """
+@schema
+class IngestDoubletCalciumWave(dj.Computed):
+    definition = """
+    -> imaging.Movie
+    ---
+    doublet_cawave_complete : int #1
+    """
+    def make(self, key):
+        max_neuropil_num = 3 # only neuropil 0 and 1 are needed right now..
+        max_channel_num = 1 # only channel 1
+        neuropil_correlation_min_corr_coeff=.5
+        neuropil_correlation_min_pixel_number=100
+        neuropil_r_fallback = .8
+        ca_wave_time_back = 1
+        ca_wave_time_back_for_baseline = .2
+        ca_wave_time_forward = 3
+        global_f0_time = 10 #seconds
+        max_rise_time = .8 #seconds to find maximum after last AP in a group # 0.1 for pyr
+        gaussian_filter_sigmas = CalciumWaveFilter().fetch('gaussian_filter_sigma')#imaging_gt.
+        neuropil_subtractions = CalciumWaveNeuropilHandling().fetch('neuropil_subtraction')#imaging_gt.
+        groundtruth_rois = ROISweepCorrespondance()&key#imaging_gt.
+        
+        calcium_wave_list = list()
+        calcium_wave_neuropil_list = list()
+        calcium_wave_properties_list = list()
+        #%
+        for groundtruth_roi in groundtruth_rois:
+            channels = imaging.MovieChannel()&groundtruth_roi
+            apgroups = ephysanal_cell_attached.APDoublet()&groundtruth_roi
+            session_start_time = (experiment.Session&groundtruth_roi).fetch1('session_time')
+            cell_start_time = (ephys_cell_attached.Cell&groundtruth_roi).fetch1('cell_recording_start')
+            sweep_start_time = (ephys_cell_attached.Sweep&groundtruth_roi).fetch1('sweep_start_time')
+            sweep_timeoffset = (cell_start_time -session_start_time).total_seconds()
+            sweep_start_time = float(sweep_start_time)+sweep_timeoffset
+            roi_timeoffset = (imaging.ROI()&groundtruth_roi).fetch1('roi_time_offset')
+            frame_times = (imaging.MovieFrameTimes()&groundtruth_roi).fetch1('frame_times') + roi_timeoffset
+            framerate = 1/np.median(np.diff(frame_times))
+            ca_wave_step_back = int(ca_wave_time_back*framerate)
+            ca_wave_step_back_for_baseline = int(ca_wave_time_back_for_baseline*framerate)
+            ca_wave_step_forward =int(ca_wave_time_forward*framerate)
+            global_f0_step = int(global_f0_time*framerate)
+            ophys_time = np.arange(-ca_wave_step_back,ca_wave_step_forward)/framerate*1000
+            #break
+            #%
+            for channel in channels:
+                groundtruth_roi_now = groundtruth_roi.copy()
+                groundtruth_roi_now['channel_number'] = channel['channel_number']
+                if channel['channel_number']>max_channel_num:
+                    continue
+                F = (imaging.ROITrace()&groundtruth_roi_now).fetch1('roi_f')
+                F_filt_list = list()
+                for gaussian_filter_sigma in gaussian_filter_sigmas: # create filtered ROI traces
+                    if gaussian_filter_sigma>0:
+                        F_filt_list.append(gaussFilter(F,sRate = framerate,sigma = gaussian_filter_sigma/1000))
+                    else:
+                        F_filt_list.append(F)
+                #F_filt = np.asarray(F_filt)
+                neuropils = np.asarray(list(imaging.ROINeuropil()&groundtruth_roi_now))
+                Fneu_list = list()
+                Fneu_filt_list = list()
+                for neuropil in neuropils: # extracting neuropils
+                    groundtruth_roi_neuropil = groundtruth_roi_now.copy()
+                    groundtruth_roi_neuropil['neuropil_number'] = neuropil['neuropil_number']
+                    try:
+                        Fneu_list.append((imaging.ROINeuropilTrace()&groundtruth_roi_neuropil).fetch1('neuropil_f'))   
+                        Fneu_filt_list_now = list()
+                        for gaussian_filter_sigma in gaussian_filter_sigmas: # create filtered neuropil traces
+                            if gaussian_filter_sigma>0:
+                                Fneu_filt_list_now.append(gaussFilter(Fneu_list[-1],sRate = framerate,sigma = gaussian_filter_sigma/1000))
+                            else:
+                                Fneu_filt_list_now.append(Fneu_list[-1])
+                        Fneu_filt_list.append(np.asarray(Fneu_filt_list_now))
+                    except:
+                        neuropils = neuropils[:len(Fneu_list)]
+                for apgroup in apgroups:
+                    groundtruth_roi_now['ap_doublet_number'] = apgroup['ap_doublet_number']
+                    ap_doublet_start_time = float(apgroup['ap_doublet_start_time'])+sweep_timeoffset
+                    ap_doublet_length = float(apgroup['ap_doublet_length'])
+                    ca_wave_now = groundtruth_roi_now.copy()
+                    cawave_f = np.ones(len(ophys_time))*np.nan
+                    start_idx = np.argmin(np.abs(frame_times-ap_doublet_start_time))
+                    idxs = np.arange(start_idx-ca_wave_step_back,start_idx+ca_wave_step_forward)
+                    idxs_valid = (idxs>=0) & (idxs<len(F))
+                    if sum(idxs_valid)<len(idxs_valid):#np.abs(time_diff)>1/framerate:
+                        #print('calcium wave outside recording, skipping {}'.format(groundtruth_roi_now))
+                        continue
+                    cawave_f[idxs_valid] = F[idxs[idxs_valid]]
+                    time_diff = frame_times[start_idx]-ap_doublet_start_time
+                    
+                    cawave_time = ophys_time+time_diff*1000
+                    ca_wave_now['doublet_cawave_f'] = cawave_f
+                    ca_wave_now['doublet_cawave_time'] = cawave_time
+                    calcium_wave_list.append(ca_wave_now)
+                    
+                    for neuropil,Fneu,Fneu_filt in zip(neuropils,Fneu_list,Fneu_filt_list):
+                        ca_wave_neuropil_now = groundtruth_roi_now.copy()
+                        ca_wave_neuropil_now['neuropil_number'] = neuropil['neuropil_number']
+                        if neuropil['neuropil_number']>max_neuropil_num:# way too many neuropils, don't need it right now
+                            continue
+                        cawave_fneu = np.ones(len(ophys_time))*np.nan
+                        cawave_fneu[idxs_valid] = Fneu[idxs[idxs_valid]]
+                        ca_wave_neuropil_now['doublet_cawave_fneu'] = cawave_fneu
+                        calcium_wave_neuropil_list.append(ca_wave_neuropil_now)
+                        
+                        ca_wave_properties = groundtruth_roi_now.copy()
+                        ca_wave_properties['neuropil_number'] = neuropil['neuropil_number']                    
+                        for gaussian_filter_sigma,F_filt,Fneu_filt in zip(gaussian_filter_sigmas,F_filt_list,Fneu_filt): # create filtered ROI traces
+                            for neuropil_subtraction in neuropil_subtractions:
+                                ca_wave_properties_now = ca_wave_properties.copy()
+                                ca_wave_properties_now['gaussian_filter_sigma']=gaussian_filter_sigma
+                                ca_wave_properties_now['neuropil_subtraction']=neuropil_subtraction
+                                if neuropil_subtraction == 'none':
+                                    r_neu = 0
+                                elif neuropil_subtraction == 'calculated':
+                                    try:
+                                        r_neu,r_neu_corrcoeff,r_neu_pixelnum = (ROINeuropilCorrelation()&ca_wave_properties).fetch1('r_neu','r_neu_corrcoeff','r_neu_pixelnum')##imaging_gt.
+                                        if r_neu_corrcoeff<neuropil_correlation_min_corr_coeff or r_neu_pixelnum <= neuropil_correlation_min_pixel_number:
+                                            1/0 # just to get to the exception
+                                    except:
+                                        #print('no calculated r_neuropil or low correlation coefficient for {}, resetting to .7'.format(ca_wave_properties_now))
+                                        r_neu = neuropil_r_fallback
+                                        
+                                else:
+                                    r_neu = float(neuropil_subtraction)
+                                
+                                F_subtracted = F_filt-Fneu_filt*r_neu
+                                F0_gobal = np.percentile(F_subtracted[np.max([0,int(start_idx-global_f0_step/2)]):np.min([len(F_subtracted),int(start_idx+global_f0_step/2)])],10)
+                                cawave_f_now = np.ones(len(ophys_time))*np.nan
+                                cawave_f_now[idxs_valid] = F_subtracted[idxs[idxs_valid]]
+                                #%
+                                if max_rise_time+ap_doublet_length>cawave_time[-1]/1000:
+                                    end_idx = len(cawave_time)
+                                else:
+                                    end_idx =np.argmax(max_rise_time+ap_doublet_length<cawave_time/1000)
+                                peak_amplitude_idx = np.argmax(cawave_f_now[ca_wave_step_back:end_idx])+ca_wave_step_back
+                                #%
+                                baseline_step_num = ca_wave_step_back - int((gaussian_filter_sigma*4)/1000)
+                                baseline_step_start = ca_wave_step_back-ca_wave_step_back_for_baseline- int((gaussian_filter_sigma*4)/1000)
+                                ca_wave_properties_now['doublet_cawave_rneu'] =r_neu
+                                ca_wave_properties_now['doublet_cawave_baseline_f'] = np.nanmean(cawave_f_now[baseline_step_start:baseline_step_num])
+                                ca_wave_properties_now['doublet_cawave_baseline_f_std'] = np.nanstd(cawave_f_now[baseline_step_start:baseline_step_num])
+                                ca_wave_properties_now['doublet_cawave_baseline_dff_global'] = (ca_wave_properties_now['doublet_cawave_baseline_f']-F0_gobal)/F0_gobal
+                                ca_wave_properties_now['doublet_cawave_peak_amplitude_f'] = cawave_f_now[peak_amplitude_idx]-ca_wave_properties_now['doublet_cawave_baseline_f']
+                                ca_wave_properties_now['doublet_cawave_peak_amplitude_dff'] = ca_wave_properties_now['doublet_cawave_peak_amplitude_f']/ca_wave_properties_now['doublet_cawave_baseline_f']
+                                ca_wave_properties_now['doublet_cawave_rise_time'] = cawave_time[peak_amplitude_idx]
+                                ca_wave_properties_now['doublet_cawave_snr'] = ca_wave_properties_now['doublet_cawave_peak_amplitude_f']/ca_wave_properties_now['doublet_cawave_baseline_f_std']
+                                
+                                cawave_f_now_normalized = (cawave_f_now-ca_wave_properties_now['doublet_cawave_baseline_f'])/ca_wave_properties_now['doublet_cawave_peak_amplitude_f']
+                                half_decay_time_idx = np.argmax(cawave_f_now_normalized[peak_amplitude_idx:]<.5)+peak_amplitude_idx
+                                ca_wave_properties_now['doublet_cawave_half_decay_time'] = cawave_time[half_decay_time_idx]-ca_wave_properties_now['doublet_cawave_rise_time']
+                                
+                                calcium_wave_properties_list.append(ca_wave_properties_now)
+         #%            
+        #with dj.conn().transaction: #inserting one movie
+        #print('uploading calcium waves for {}'.format(key)) #movie['movie_name']
+        DoubletCalciumWave().insert(calcium_wave_list, allow_direct_insert=True)#imaging_gt.
+        dj.conn().ping()
+        DoubletCalciumWave.DoubletCalciumWaveNeuropil().insert(calcium_wave_neuropil_list, allow_direct_insert=True)#imaging_gt.
+        dj.conn().ping()
+        DoubletCalciumWave.DoubletCalciumWaveProperties().insert(calcium_wave_properties_list, allow_direct_insert=True)#imaging_gt.
+        key['doublet_cawave_complete'] = 1
+        self.insert1(key,skip_duplicates=True)        

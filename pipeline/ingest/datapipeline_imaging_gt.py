@@ -33,6 +33,8 @@ def populatemytables_core_paralel(arguments,runround):
     elif runround == 2:
         imaging_gt.SessionROIFDistribution().populate(**arguments)
         imaging_gt.IngestCalciumWave().populate(**arguments)
+        imaging_gt.IngestDoubletCalciumWave().populate(**arguments)
+        
         
     elif runround == 3:
         imaging_gt.MovieCalciumWaveSNR().populate(**arguments)
@@ -50,6 +52,8 @@ def populatemytables_core(arguments,runround):
     elif runround == 2:
         imaging_gt.SessionROIFDistribution().populate(**arguments)
         imaging_gt.IngestCalciumWave().populate(**arguments)
+        imaging_gt.IngestDoubletCalciumWave().populate(**arguments)
+        
     elif runround == 3:
         imaging_gt.MovieCalciumWaveSNR().populate(**arguments)
         

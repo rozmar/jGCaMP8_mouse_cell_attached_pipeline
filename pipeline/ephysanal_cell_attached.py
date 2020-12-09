@@ -13,7 +13,37 @@ import time
 schema = dj.schema(pipeline_tools.get_schema_name('ephysanal_cell_attached'),locals())
 
 #%%
+@schema
+class EphysCellType(dj.Computed):
+    definition = """
+    -> ephys_cell_attached.Cell
+    ---
+    ephys_cell_type : varchar(20) # pyr / int / unidentified
+    """
+    def make(self, key):
+        #%
+# =============================================================================
+#         key = {'subject_id':471991,
+#                'session':1,
+#                'cell_number':1}
+# =============================================================================
+        
+        cellspikeparameters = CellSpikeParameters()&key#ephysanal_cell_attached
+        if len(cellspikeparameters) ==0:
+            key['ephys_cell_type'] = 'unidentified'
+        else:
+            if len(cellspikeparameters)>1:
+                cellspikeparameters = cellspikeparameters&'recording_mode = "current clamp"'
+            ap_peak_to_trough_time_median,ap_ahp_amplitude_median = cellspikeparameters.fetch1('ap_peak_to_trough_time_median','ap_ahp_amplitude_median')
+            if ap_peak_to_trough_time_median < 0.65 and ap_ahp_amplitude_median>.1:
+                key['ephys_cell_type'] = 'int'
+            else:
+                key['ephys_cell_type'] = 'pyr'
 
+        self.insert1(key,skip_duplicates=True)
+        
+        
+    #%
 @schema
 class ActionPotential(dj.Computed):
     definition = """
@@ -320,6 +350,97 @@ class IngestAPGroupTrace(dj.Imported):
         self.insert1(key,skip_duplicates=True)
         
         #%%
+@schema
+class APDoublet(dj.Imported):
+    definition = """
+    -> ephys_cell_attached.Sweep
+    ap_doublet_number   : int # unique within cell
+    ---
+    ap_doublet_start_time : decimal(8,4) #- time of first AP in group from recording start (cell start time)
+    ap_doublet_length   : double #- length in seconds
+    ap_doublet_min_snr_v  : double
+    ap_doublet_min_snr_dv : double
+    ap_doublet_pre_isi    : double
+    ap_doublet_post_isi   : double
+    """
+    class APDoubletMember(dj.Part):
+        definition = """
+        -> master
+        -> ActionPotential
+        """
+
+@schema
+class IngestAPDoublet(dj.Imported):
+    definition = """
+    -> ephys_cell_attached.Sweep
+    ---
+    ap_doublet_complete : int
+    """
+    def make(self, key):
+        key_original = key.copy()
+        key_original['ap_doublet_complete'] = 1
+        min_baseline_time = .1 
+        max_doublet_isi = .1
+        sweep_numbers = (ephys_cell_attached.Sweep()&key).fetch('sweep_number')
+        apdoublet_list = list()
+        doubletmember_list = list()
+        ap_doublet_number = 0
+        for sweep_number in sweep_numbers:
+            dj.conn().ping()
+            key['sweep_number'] = sweep_number
+            sweep_start_time,sweep_end_time = (ephys_cell_attached.Sweep()&key).fetch1('sweep_start_time','sweep_end_time')
+            sweep_end_time = float(sweep_end_time-sweep_start_time)
+            sweep_start_time = float(sweep_start_time)
+            ap_num,ap_max_time,ap_snr_v,ap_snr_dv = (ephys_cell_attached.Sweep()*ActionPotential()&key).fetch('ap_num','ap_max_time','ap_snr_v','ap_snr_dv')#ephysanal_cell_attached
+            ap_max_time = np.asarray(ap_max_time,float)
+            
+            isis_pre = np.diff(np.concatenate([[0],ap_max_time]))
+            isis_post = np.diff(np.concatenate([ap_max_time,[sweep_end_time]]))
+            
+            doublet_start_idxes = np.where(isis_pre>min_baseline_time)[0]
+            doublet_end_idxes = doublet_start_idxes+1
+            try:
+                if doublet_end_idxes[-1]>=len(ap_max_time):
+                    doublet_end_idxes = doublet_end_idxes[:-1]
+            except:
+                pass
+            for doublet_start_idx in doublet_start_idxes:
+                if any(doublet_end_idxes>=doublet_start_idx):
+                    apdoublet_key = key.copy()
+                    ap_doublet_number += 1
+                    doublet_end_idx = doublet_end_idxes[np.argmax(doublet_end_idxes>=doublet_start_idx)]
+                    ap_indices_now = np.arange(doublet_start_idx,doublet_end_idx+1)
+                    apdoublet_key['ap_doublet_start_time'] = ap_max_time[doublet_start_idx] + sweep_start_time
+                    apdoublet_key['ap_doublet_length'] = ap_max_time[doublet_end_idx] - ap_max_time[doublet_start_idx]
+                    apdoublet_key['ap_doublet_min_snr_v'] = np.min(ap_snr_v[ap_indices_now])
+                    apdoublet_key['ap_doublet_min_snr_dv'] = np.min(ap_snr_dv[ap_indices_now])
+                    apdoublet_key['ap_doublet_pre_isi'] = isis_pre[doublet_start_idx]
+                    apdoublet_key['ap_doublet_post_isi'] = isis_post[doublet_end_idx]    
+                    apdoublet_key['ap_doublet_number'] = ap_doublet_number
+                    if apdoublet_key['ap_doublet_length']<max_doublet_isi and apdoublet_key['ap_doublet_length']>0:
+                        apdoublet_list.append(apdoublet_key)
+                        for ap_idx in ap_indices_now:
+                            doubletmember_key = key.copy()
+                            doubletmember_key['ap_doublet_number'] = ap_doublet_number
+                            doubletmember_key['ap_num'] = ap_num[ap_idx]
+                            doubletmember_list.append(doubletmember_key)
+                    else:
+                        ap_doublet_number -= 1
+                        
+                    
+         #%%               
+        #with dj.conn().transaction: #inserting one cell
+        #print('uploading AP doublets to datajoint: {}'.format(key))
+        APDoublet().insert(apdoublet_list, allow_direct_insert=True)#ephysanal_cell_attached
+        dj.conn().ping()
+        APDoublet.APDoubletMember().insert(doubletmember_list, allow_direct_insert=True)      #ephysanal_cell_attached
+        self.insert1(key_original,skip_duplicates=True)
+ 
+        
+        
+        
+        
+#%%        
 @schema
 class CellSpikeParameters(dj.Computed):
     definition = """
