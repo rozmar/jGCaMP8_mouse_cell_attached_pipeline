@@ -68,29 +68,48 @@ def plot_ap_scatter_with_ophys_prop(ca_waves_dict,plot_parameters):
     ax_ephys_scatter.set_ylabel(plot_parameters['y_parameter'])
     ax_ephys_scatter.set_title(plot_parameters['z_parameter'])
     #%%
-def plot_number_of_rois():
+def plot_number_of_rois(sensor_colors):
+    #%%
+    sensors = list(sensor_colors.keys())
     session_roi_nums_dict = dict()
     movie_roi_nums_dict = dict()
+    movie_depths_dict = dict()
     for sensor_i,sensor in enumerate(sensors):
         session_roi_nums_dict[sensor]=list()
         movie_roi_nums_dict[sensor]=list()
+        movie_depths_dict[sensor] = list()
         sessions = imaging_gt.SessionCalciumSensor()&'session_calcium_sensor = "{}"'.format(sensor)
         for session in sessions:
             session_roi_nums_dict[sensor].append(len(imaging.ROI()*imaging_gt.SessionCalciumSensor()&session))
             movies = imaging.Movie()&session
             for movie in movies:
                 movie_roi_nums_dict[sensor].append(len(imaging.ROI()*imaging_gt.SessionCalciumSensor()&movie))
-    #%  ROI number in movies, etc         
-    fig_roi_num = plt.figure(figsize = [25,10])
-    ax_roi_num = fig_roi_num.add_subplot(1,2,1)
+                movie_depths_dict[sensor].append((imaging_gt.MovieDepth()&movie).fetch1('movie_depth'))
+    #%  ROI number in movies, etc
+    
+    depth_bin_step = 1 
+    depth_bin_size = 10
+    depth_bin_range = np.arange(0,300,depth_bin_step)
+    fig_roi_num = plt.figure(figsize = [25,20])
+    ax_roi_num = fig_roi_num.add_subplot(2,2,1)
     ax_roi_num_per_subject = ax_roi_num.twinx() 
     x_roinum_swarm_list = list()
     y_roinum_swarm_list = list()
     
-    ax_movie_num = fig_roi_num.add_subplot(1,2,2)
+    ax_movie_num = fig_roi_num.add_subplot(2,2,2)
     ax_roi_num_per_movie = ax_movie_num.twinx() 
     x_roinum_swarm__movie_list = list()
     y_roinum_swarm__movie_list = list()
+    
+    ax_depth_dependence = fig_roi_num.add_subplot(2,2,3)
+    
+    ax_depth_hist = fig_roi_num.add_subplot(2,2,4)
+    ax_depth_hist_cum = ax_depth_hist.twinx()
+    depth_hist_range = np.arange(0,300+depth_bin_size,depth_bin_size)
+    depth_cum_hist_range = np.arange(0,300+1,1)
+    depths_all_cum = list()
+    depths_all = list()
+    bar_width = depth_bin_size*.9#/len(ca_wave_parameters['sensors'])*.9
     for sensor_i,sensor in enumerate(sensors):
         ax_roi_num.bar(sensor_i,sum(session_roi_nums_dict[sensor]),edgecolor = sensor_colors[sensor],fill=False,linewidth = 2)
         x_roinum_swarm_list.append(np.ones(len(session_roi_nums_dict[sensor]))*sensor_i)
@@ -100,6 +119,39 @@ def plot_number_of_rois():
         x_roinum_swarm__movie_list.append(np.ones(len(movie_roi_nums_dict[sensor]))*sensor_i)
         y_roinum_swarm__movie_list.append(movie_roi_nums_dict[sensor])
         
+        ax_depth_dependence.plot(movie_depths_dict[sensor],movie_roi_nums_dict[sensor],'o',color = sensor_colors[sensor],alpha = .3)
+        mean_roi_nums = list()
+        sd_roi_nums = list()
+        for bin_start in depth_bin_range:
+            idx = (movie_depths_dict[sensor]>=bin_start)&(movie_depths_dict[sensor]<bin_start+depth_bin_size)
+            if sum(idx)>0:
+                mean_roi_nums.append(np.mean(np.asarray(movie_roi_nums_dict[sensor])[idx]))
+                sd_roi_nums.append(np.std(np.asarray(movie_roi_nums_dict[sensor])[idx]))
+            else:
+                mean_roi_nums.append(np.nan)
+                sd_roi_nums.append(np.nan)
+        mean_roi_nums=np.asarray(mean_roi_nums)
+        sd_roi_nums = np.asarray(mean_roi_nums)
+        bin_needed = np.isnan(mean_roi_nums)==False
+        ax_depth_dependence.plot(depth_bin_range[bin_needed]+depth_bin_size/2,mean_roi_nums[bin_needed],'-',color = sensor_colors[sensor],linewidth = 4)
+        #ax_depth_dependence.errorbar(depth_bin_range[bin_needed]+depth_bin_size/2,mean_roi_nums[bin_needed],sd_roi_nums[bin_needed],color = sensor_colors[sensor])
+        
+        y_depth,x = np.histogram(movie_depths_dict[sensor],depth_hist_range)
+        y_cum,x_cum = np.histogram(movie_depths_dict[sensor],depth_cum_hist_range)
+        depths_all_cum.append(y_cum)
+        depths_all.append(y_depth)
+        
+        
+        #
+    depth_hist_bins = np.mean([depth_hist_range[:-1],depth_hist_range[1:]],0)
+    depth_cum_hist_bins = np.mean([depth_cum_hist_range[:-1],depth_cum_hist_range[1:]],0)
+    bottoms = np.zeros(len(depth_hist_bins))
+    for i,sensor in enumerate(sensor_colors.keys()):
+        ax_depth_hist.bar(depth_hist_bins, depths_all[i], bar_width,bottom=bottoms, color= sensor_colors[sensor],alpha = .3)#-plot_parameters['event_histogram_step']/2+bar_width*i
+        ax_depth_hist_cum.plot(depth_cum_hist_bins, np.cumsum(depths_all_cum[i])/sum(depths_all_cum[i]), color= sensor_colors[sensor],linewidth = 2)#-plot_parameters['event_histogram_step']/2+bar_width*i
+        bottoms = depths_all[i]+bottoms 
+    
+    
     sns.swarmplot(x =np.concatenate(x_roinum_swarm_list),y = np.concatenate(y_roinum_swarm_list),color='black',ax = ax_roi_num_per_subject)     
     sns.swarmplot(x =np.concatenate(x_roinum_swarm__movie_list),y = np.concatenate(y_roinum_swarm__movie_list),color='black',ax = ax_roi_num_per_movie,size = 2)     
     
@@ -115,6 +167,9 @@ def plot_number_of_rois():
     ax_roi_num_per_movie.set_ylabel('Number of ROIs per movie')
     ax_roi_num_per_movie.set_ylim([0,ax_roi_num_per_movie.get_ylim()[1]])
     
+    ax_depth_dependence.set_xlabel('depth from pia (microns)')
+    ax_depth_dependence.set_ylabel('number of active ROIs per movie')
+    #%%
 def plot_stats(plot_properties):
     fig_exptime_movielen = plt.figure()
     ax_exptime_movielen = fig_exptime_movielen.add_subplot(1,1,1)
@@ -227,6 +282,7 @@ def plot_stats(plot_properties):
 
 
 def ca_wave_properties_scatter_onpick(event):
+    cax_limits = [0,99] # mean image grayscale
     axesdata = event.canvas.axes_dict
     data = axesdata['data_dict']
     event_idx = event.ind[0]
@@ -383,7 +439,9 @@ def ca_wave_properties_scatter_onpick(event):
         alpha = .3
         #registered_movie_mean_image_ch2 = (imaging_gt.ROISweepCorrespondance()*imaging.RegisteredMovieImage()*imaging.ROI()*imaging.ROINeuropil()&key&'channel_number = 2').fetch1('registered_movie_mean_image')
         registered_movie_mean_image_ch1,roi_xpix,roi_ypix,neuropil_xpix,neuropil_ypix,movie_pixel_size = (imaging_gt.ROISweepCorrespondance()*imaging.RegisteredMovieImage()*imaging.ROI()*imaging.ROINeuropil()*imaging.Movie()&key&'channel_number = 1').fetch1('registered_movie_mean_image','roi_xpix','roi_ypix','neuropil_xpix','neuropil_ypix','movie_pixel_size')
-        ax_mean_image.imshow(registered_movie_mean_image_ch1,cmap = 'gray', extent=[0,registered_movie_mean_image_ch1.shape[1]*float(movie_pixel_size),0,registered_movie_mean_image_ch1.shape[0]*float(movie_pixel_size)], aspect='auto')
+        ch_1_image = ax_mean_image.imshow(registered_movie_mean_image_ch1,cmap = 'gray', extent=[0,registered_movie_mean_image_ch1.shape[1]*float(movie_pixel_size),0,registered_movie_mean_image_ch1.shape[0]*float(movie_pixel_size)], aspect='auto')
+        clim = np.percentile(registered_movie_mean_image_ch1.flatten(),cax_limits)
+        ch_1_image.set_clim(clim)
         ROI = np.zeros_like(registered_movie_mean_image_ch1)*np.nan
         ROI[roi_ypix,roi_xpix] = 1
         ROIneuropil = np.zeros_like(registered_movie_mean_image_ch1)*np.nan
@@ -438,8 +496,8 @@ def scatter_plot_all_event_properties(ca_waves_dict,ca_wave_parameters,plot_para
     axes_dict['ax_expression_time'] = fig.add_subplot(4,4,11,sharex = axes_dict['ax_1ap_snr_amplitude_cell'])
     axes_dict['ax_event_num_hist'] = fig.add_subplot(4,4,14)
     axes_dict['ax_event_num_cum_hist'] = axes_dict['ax_event_num_hist'].twinx()
-    #axes_dict['ax_neuropil'] = fig.add_subplot(4,4,15,sharex = axes_dict['ax_1ap_snr_amplitude_cell'])
-    axes_dict['ax_f0_power'] = fig.add_subplot(4,4,15)
+    axes_dict['ax_neuropil'] = fig.add_subplot(4,4,15,sharex = axes_dict['ax_1ap_snr_amplitude_cell'])
+    #axes_dict['ax_f0_power'] = fig.add_subplot(4,4,15)
     
     axes_dict['ax_ap_peak_to_trough_time_median'] = fig.add_subplot(4,4,4,sharex = axes_dict['ax_1ap_snr_amplitude_cell'])
     axes_dict['ax_ap_halfwidth_median'] = fig.add_subplot(4,4,8,sharex = axes_dict['ax_1ap_snr_amplitude_cell'])
@@ -471,9 +529,9 @@ def scatter_plot_all_event_properties(ca_waves_dict,ca_wave_parameters,plot_para
     axes_dict['ax_event_num_hist'].set_xlabel('Number of events per cell')
     axes_dict['ax_event_num_hist'].set_ylabel('Number of cells')
     axes_dict['ax_movie_power'].set_ylabel('laser power after objective (mW)')
-    #axes_dict['ax_neuropil'].set_ylabel('r_neuropil - calculated')
-    axes_dict['ax_f0_power'].set_ylabel('baseline fluorescence (F)')#
-    axes_dict['ax_f0_power'].set_xlabel('laser power after objective (mW)')#
+    axes_dict['ax_neuropil'].set_ylabel('r_neuropil - calculated')
+    #axes_dict['ax_f0_power'].set_ylabel('baseline fluorescence (F)')#
+    #axes_dict['ax_f0_power'].set_xlabel('laser power after objective (mW)')#
     
     
     data_dict = dict()
@@ -571,12 +629,10 @@ def scatter_plot_all_event_properties(ca_waves_dict,ca_wave_parameters,plot_para
             axes_dict['ax_expression_time'].plot(x,y,'o',ms=plot_parameters['scatter_marker_size'],color = sensor_colors[sensor],alpha = alpha)
             data_dict['ax_expression_time_x'].append(x)
             data_dict['ax_expression_time_y'].append(y)
-# =============================================================================
-#             y = cell_data['cawave_rneu'][cell_data['ap_group_ap_num']==plot_parameters['ap_num_to_plot']]
-#             axes_dict['ax_neuropil'].semilogy(x,y,'o',ms=plot_parameters['scatter_marker_size'],color = sensor_colors[sensor],alpha = alpha)
-#             data_dict['ax_neuropil_x'].append(x)
-#             data_dict['ax_neuropil_y'].append(y)
-# =============================================================================
+            y = cell_data['cawave_rneu'][cell_data['ap_group_ap_num']==plot_parameters['ap_num_to_plot']]
+            axes_dict['ax_neuropil'].semilogy(x,y,'o',ms=plot_parameters['scatter_marker_size'],color = sensor_colors[sensor],alpha = alpha)
+            data_dict['ax_neuropil_x'].append(x)
+            data_dict['ax_neuropil_y'].append(y)
             
             y = cell_data['ap_peak_to_trough_time_median'][cell_data['ap_group_ap_num']==plot_parameters['ap_num_to_plot']]
             axes_dict['ax_ap_peak_to_trough_time_median'].plot(x,y,'o',ms=plot_parameters['scatter_marker_size'],color = sensor_colors[sensor],alpha = alpha)
@@ -613,9 +669,11 @@ def scatter_plot_all_event_properties(ca_waves_dict,ca_wave_parameters,plot_para
             
             x = cell_data['movie_power'][cell_data['ap_group_ap_num']==plot_parameters['ap_num_to_plot']]
             y = cell_data['cawave_baseline_f'][cell_data['ap_group_ap_num']==plot_parameters['ap_num_to_plot']]
-            axes_dict['ax_f0_power'].semilogy(x,y,'o',ms=plot_parameters['scatter_marker_size'],color = sensor_colors[sensor],alpha = alpha)
-            data_dict['ax_f0_power_x'].append(x)
-            data_dict['ax_f0_power_y'].append(y)
+# =============================================================================
+#             axes_dict['ax_f0_power'].semilogy(x,y,'o',ms=plot_parameters['scatter_marker_size'],color = sensor_colors[sensor],alpha = alpha)
+#             data_dict['ax_f0_power_x'].append(x)
+#             data_dict['ax_f0_power_y'].append(y)
+# =============================================================================
             
             
             
@@ -759,10 +817,17 @@ def plot_all_traces(ca_traces_dict,ca_traces_dict_by_cell,ca_wave_parameters,plo
             
 def plot_r_neu_distribution(sensor_colors,ca_wave_parameters):
     #%%
+    depth_fit_x = np.arange(50,200)
+    depth_fit_order = 1
+    radius_fit_x = np.arange(5,20)
+    radius_fit_order = 1
     min_rneu_corrcoeff = .7
-    fig = plt.figure()
-    ax_hist_rneu = fig.add_subplot(1,1,1)
+    fig = plt.figure(figsize = [15,10])
+    ax_hist_rneu = fig.add_subplot(2,2,1)
     ax_cumhist_rneu = ax_hist_rneu.twinx()
+    ax_depth_rneu = fig.add_subplot(2,2,2)
+    ax_radius_rneu = fig.add_subplot(2,2,3)
+    ax_radius_depth = fig.add_subplot(2,2,4)
     rneu_histogram_step = .1
     
     
@@ -773,12 +838,31 @@ def plot_r_neu_distribution(sensor_colors,ca_wave_parameters):
     #for sensor in sensor_colors.keys():
     ys = list()
     cum_ys = list()
+    rneu_all = list()
+    depth_all = list()
     for sensor in ca_wave_parameters['sensors']:
-        data = (imaging_gt.SessionCalciumSensor()*imaging_gt.ROINeuropilCorrelation()&'r_neu_corrcoeff>{}'.format(min_rneu_corrcoeff)&'channel_number=1'&'neuropil_number = 1'&'session_calcium_sensor = "{}"'.format(sensor)).fetch('r_neu')
+        data,depth,roi_radius,movie_pixel_size = (imaging.Movie()*imaging.ROI()*imaging.MoviePowerPostObjective()*imaging_gt.MovieDepth()*imaging_gt.SessionCalciumSensor()*imaging_gt.ROINeuropilCorrelation()&'r_neu_corrcoeff>{}'.format(min_rneu_corrcoeff)&'channel_number=1'&'neuropil_number = 1'&'session_calcium_sensor = "{}"'.format(sensor)).fetch('r_neu','movie_depth','roi_radius','movie_pixel_size')#'movie_depth'movie_power
+        
+        cell_radius = roi_radius*np.asarray(movie_pixel_size,float)
+        needed = (np.isnan(depth)==False) & (np.isnan(data)==False) &(data<=2) &(cell_radius<12)
+        rneu_all.extend(data[needed])
+        depth_all.extend(depth[needed])
         y,x = np.histogram(data,hist_range)
         y_cum,x_cum = np.histogram(data,cum_hist_range)
         cum_ys.append(y_cum)
         ys.append(y)
+        p=np.polyfit(depth[needed],data[needed],depth_fit_order)
+        ax_depth_rneu.plot(depth,data,'o',color = sensor_colors[sensor],alpha = .3)
+        ax_depth_rneu.plot(depth_fit_x,np.polyval(p,depth_fit_x),'-',color = sensor_colors[sensor])
+        
+        
+        p=np.polyfit(depth[needed],cell_radius[needed],depth_fit_order)
+        ax_radius_depth.plot(depth,cell_radius,'o',color = sensor_colors[sensor],alpha = .3)
+        ax_radius_depth.plot(depth_fit_x,np.polyval(p,depth_fit_x),'-',color = sensor_colors[sensor])
+        
+        p=np.polyfit(cell_radius[needed],data[needed],depth_fit_order)
+        ax_radius_rneu.plot(cell_radius,data,'o',color = sensor_colors[sensor],alpha = .3)
+        ax_radius_rneu.plot(radius_fit_x,np.polyval(p,radius_fit_x),'-',color = sensor_colors[sensor])
     hist_bins = np.mean([hist_range[:-1],hist_range[1:]],0)
     cum_hist_bins = np.mean([cum_hist_range[:-1],cum_hist_range[1:]],0)
     bottoms = np.zeros(len(hist_bins))
@@ -789,6 +873,12 @@ def plot_r_neu_distribution(sensor_colors,ca_wave_parameters):
     ax_cumhist_rneu.set_ylim([0,1])
     ax_hist_rneu.set_xlabel('calculated r_neu using ground truth ephys')
     ax_hist_rneu.set_ylabel('number of ROIs')
+    
+    p=np.polyfit(depth_all,rneu_all,depth_fit_order)
+    ax_depth_rneu.plot(depth_fit_x,np.polyval(p,depth_fit_x),'k-',linewidth = 5)
+    ax_depth_rneu.set_xlabel('depth from surface of pia (microns)')
+    ax_depth_rneu.set_ylabel('calculated r_neu using ground truth ephys')
+    ax_depth_rneu.set_ylim([.25,2])
     legend_elements = list()
     for sensor in sensor_colors.keys():
         legend_elements.append(Line2D([0], [0], marker='o', color=sensor_colors[sensor], 
