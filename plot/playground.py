@@ -31,6 +31,70 @@ matplotlib.rcParams['font.sans-serif'] = ['Tahoma']
 # #%%
 # plt.plot(f0,std/f0,'ko',markersize = 1,alpha = .1)
 # =============================================================================
+#%% does snr corelate with overall firing rate?
+sensors = ['GCaMP7F','XCaMPgf','456','686','688']
+fields_to_get = ['movie_mean_cawave_snr_per_ap',
+                 'movie_total_ap_num',
+                 'movie_frame_num',
+                 'movie_frame_rate',
+                 'ephys_cell_type',
+                 'subject_id',
+                 'cell_number',
+                 'sweep_start_time',
+                 'sweep_end_time',
+                 'roi_f_min',
+                 'movie_power']
+fig = plt.figure()
+for i,sensor in enumerate(sensors):
+    if i ==0:
+        ax_now = fig.add_subplot(len(sensors),3,3*i+1)
+        ax_start = ax_now
+        ax_now_cell = fig.add_subplot(len(sensors),3,3*i+2)
+        ax_start_cell = ax_now_cell
+    else:
+        ax_now = fig.add_subplot(len(sensors),3,3*i+1,sharex = ax_start, sharey = ax_start)
+        ax_now_cell = fig.add_subplot(len(sensors),3,3*i+2,sharex = ax_start_cell, sharey = ax_start_cell)
+    data  = (imaging.ROITrace()*imaging.MoviePowerPostObjective()*ephys_cell_attached.Sweep()*imaging_gt.ROISweepCorrespondance()*ephysanal_cell_attached.EphysCellType()*imaging_gt.MovieCalciumWaveSNR()*imaging_gt.SessionCalciumSensor()*imaging.Movie() &'session_calcium_sensor = "{}"'.format(sensor)&'channel_number = 1').fetch(*fields_to_get)
+    data_dict = dict()
+    for fieldname,data_now in zip(fields_to_get,data):
+        data_dict[fieldname] = data_now
+    unique_cell_id = list()
+    for subject_id,cell_number in zip(data_dict['subject_id'],data_dict['cell_number']):
+        unique_cell_id.append('{}_{}'.format(subject_id,cell_number))
+    unique_cell_id=np.asarray(unique_cell_id)
+    movie_len = np.asarray(data_dict['sweep_end_time']-data_dict['sweep_start_time'],float)#data_dict['movie_frame_num']/data_dict['movie_frame_rate']
+    firing_rate = data_dict['movie_total_ap_num']/movie_len
+    
+    pyr_idx = np.where(data_dict['ephys_cell_type']=='pyr')[0]
+    int_idx = np.where(data_dict['ephys_cell_type']=='int')[0]
+    ax_now.plot(firing_rate[pyr_idx],data_dict['movie_mean_cawave_snr_per_ap'][pyr_idx],'ko',alpha = .3)
+    ax_now.plot(firing_rate[int_idx],data_dict['movie_mean_cawave_snr_per_ap'][int_idx],'ro',alpha = .3)
+    if i == len(sensors)-1:
+        ax_now.set_xlabel('Average firing rate in movie (Hz)')
+    if i == 0:
+        ax_now.set_title('SNR/AP estimate per movie')
+    ax_now.set_ylabel(sensor)
+    
+    for cell_id_now in np.unique(unique_cell_id):
+        idx = cell_id_now==unique_cell_id
+        firing_rate_cell = np.mean(firing_rate[idx])
+        firing_rate_cell_std = np.std(firing_rate[idx])/np.sqrt(sum(idx))
+        snr_per_cell = np.mean(data_dict['movie_mean_cawave_snr_per_ap'][idx])
+        snr_per_cell_std = np.std(data_dict['movie_mean_cawave_snr_per_ap'][idx])/np.sqrt(sum(idx))
+        if data_dict['ephys_cell_type'][idx][0]=='pyr':
+            ax_now_cell.plot(firing_rate_cell,snr_per_cell,'ko',alpha = .3)
+            ax_now_cell.errorbar(firing_rate_cell,snr_per_cell,firing_rate_cell_std,snr_per_cell_std,color = 'black',alpha = .3)
+        elif data_dict['ephys_cell_type'][idx][0]=='int':
+            ax_now_cell.plot(firing_rate_cell,snr_per_cell,'ro',alpha = .3)
+            ax_now_cell.errorbar(firing_rate_cell,snr_per_cell,firing_rate_cell_std,snr_per_cell_std,color = 'red',alpha = .3)
+    if i == len(sensors)-1:
+        ax_now_cell.set_xlabel('Average firing rate for a cell (Hz)')
+    if i == 0:
+        ax_now_cell.set_title('SNR/AP estimate per cell')
+    #ax_now_cell.set_ylabel('SNR/AP estimate')
+    
+    
+    #break
 
 #%% injection number and titers
 sensors = ['GCaMP7F','XCaMPgf','456','686','688']
@@ -435,12 +499,13 @@ ca_wave_parameters = {'only_manually_labelled_movies':False,
                       'min_post_isi':1,
                       'max_sweep_ap_hw_std_per_median':.2,
                       'min_sweep_ap_snr_dv_median':10,
-                      'gaussian_filter_sigma':0,#0,5,10,20,50
-                      'neuropil_subtraction':'none',#'none','0.7','calculated','0.8'
+                      'gaussian_filter_sigma':10,#0,5,10,20,50
+                      'neuropil_subtraction':'calculated',#'none','0.7','calculated','0.8'
                       'neuropil_number':1,#0,1 # 0 is 2 pixel , 1 is 4 pixels left out around the cell
                       'sensors': ['GCaMP7F','XCaMPgf','456','686','688'], # this determines the order of the sensors
                       'ephys_recording_mode':'current clamp',
                       'minimum_f0_value':20,
+                      'min_channel_offset':100
                       }
 if leave_out_putative_interneurons:
     ca_wave_parameters['max_ap_peak_to_trough_time_median']=0.65
@@ -492,7 +557,11 @@ plot_parameters={'sensor_colors':sensor_colors,
 #%
 imaging_plot.scatter_plot_all_event_properties(ca_waves_dict,ca_wave_parameters,plot_parameters)
 #%% neuropil distribution
+import plot.imaging_gt_plot as imaging_plot
 imaging_plot.plot_r_neu_distribution(sensor_colors,ca_wave_parameters)
+#%% number of ROIs in each movie
+import plot.imaging_gt_plot as imaging_plot
+imaging_plot.plot_number_of_rois(sensor_colors)
 #%% ap parameters scatter plot, calcium sensor, median ap wave amplitude
 plot_parameters = {'sensors':['GCaMP7F','XCaMPgf','456','686','688'],
                    'sensor_colors':sensor_colors,
@@ -530,9 +599,12 @@ plot_parameters={'sensor_colors':sensor_colors,
 imaging_plot.plot_all_traces(ca_traces_dict,ca_traces_dict_by_cell,ca_wave_parameters,plot_parameters)    
 
 #%%
+from utils import utils_plot
 wave_parameters = {'ap_num_to_plot':2,#ap_num_to_plot
-                   'min_ap_per_apnum':min_ap_per_apnum}
-ca_traces_dict,ca_traces_dict_by_cell  = utils_plot.collect_ca_wave_traces( ca_wave_parameters,ca_waves_dict,wave_parameters   )
+                   'min_ap_per_apnum':1}
+ca_wave_parameters['min_pre_isi']=.1
+ca_wave_parameters['min_post_isi']=.1
+ca_traces_dict,ca_traces_dict_by_cell  = utils_plot.collect_ca_wave_traces( ca_wave_parameters,ca_waves_dict,wave_parameters,use_doublets = True   )
 #%% plot traces by ISI 
 time_range_step = .005
 time_range_window = .001
@@ -816,4 +888,142 @@ ax_16_pix.hist(pixnum_16pix,50)
 
 
 #%% select high SNR movies for all sensors
+#%% anatomy
+#% filtering images
+import os
+from skimage.io import imread
+import scipy.ndimage as ndimage
+from sklearn.metrics import pairwise_distances
+anatomy_base_dir = '/home/rozmar/Data/Anatomy/cropped_rotated'
+save_base_dir = '/home/rozmar/Data/Anatomy/filtered'
+sigma_gauss = 100 # pixels
+minimum_horizontal_separation = 500
+orverwrite = True
+dirs_ = os.listdir(anatomy_base_dir)
+subject_ids = list()
+dirs =  list()
+for dir_now in dirs_: 
+    if dir_now[3:9].isnumeric():
+        dirs.append(dir_now)
+        subject_ids.append(dir_now[3:9])
+peak_data = dict()
+fig = plt.figure(figsize = [20,20])
+for subject_id,subject_dir in zip(subject_ids,dirs):
+    if '20x' not in subject_dir:
+        continue # only 20x images
+    if os.path.exists(os.path.join(save_base_dir,basename+str(z)+'.jpg')) and not orverwrite:
+        continue
+    peak_data[subject_dir] = dict()
+    peak_data[subject_dir]['peak_values_rfp_1'] = list()
+    peak_data[subject_dir]['peak_values_fitc_1'] = list()
+    peak_data[subject_dir]['peak_values_rfp_2'] = list()
+    peak_data[subject_dir]['peak_values_fitc_2'] = list()
+    peak_data[subject_dir]['peak_idx_x_1'] = list()
+    peak_data[subject_dir]['peak_idx_y_1'] = list()
+    peak_data[subject_dir]['peak_idx_x_2'] = list()
+    peak_data[subject_dir]['peak_idx_y_2'] = list()
+    peak_data[subject_dir]['z'] = list()
+    peak_data[subject_dir]['filename'] = list()
+    subject_dir_full = os.path.join(anatomy_base_dir,subject_dir)
+    channels = os.listdir(subject_dir_full)
+    rfp_dir = os.path.join(subject_dir_full,'RFP')
+    fitc_dir = os.path.join(subject_dir_full,'FITC')
+    rfp_files = np.sort(os.listdir(rfp_dir))
+    for rfp_file in rfp_files:
+        print(rfp_file)
+        basename = rfp_file[:rfp_file.find('RFP')]
+        z = int(rfp_file[rfp_file.find('_Z_')+3:-5])
+        im_rfp = imread(os.path.join(rfp_dir,rfp_file))
+        im_rfp_filt = ndimage.filters.gaussian_filter(im_rfp,sigma_gauss)
+        fitc_file = rfp_file[:rfp_file.find('RFP')]+'FITC'+rfp_file[rfp_file.find('RFP')+3:]
+        im_fitc = imread(os.path.join(fitc_dir,fitc_file))
+        im_fitc_filt = ndimage.filters.gaussian_filter(im_fitc,sigma_gauss)
+        
+        #%
+        max_val_rfp = np.max(im_rfp_filt)
+        num_objects_separated = 0
+        denominator = 1.1
+        while num_objects_separated<2 and denominator<5:
+            threshold = max_val_rfp/denominator        
+            thresholded_image = im_rfp_filt>threshold    
+            labeled, num_objects = ndimage.label(thresholded_image)
+            denominator += .1
+            #%
+            max_vals = list()
+            max_idxs = list()
+            max_idxs_x = list()
+            max_idxs_y = list()
+            for peak_num in range(1,num_objects+1):
+                max_val = np.max(im_rfp_filt[labeled==peak_num])
+                max_vals.append(max_val)
+                slice_x,slice_y = ndimage.find_objects(labeled==peak_num)[0]
+                maxidxes = np.where(im_rfp_filt[slice_x,slice_y]==np.max(im_rfp_filt[slice_x,slice_y]))
+                max_idx = np.asarray(np.mean(maxidxes,1),int)+np.asarray([slice_x.start,slice_y.start])
+                max_idxs.append(max_idx)
+                max_idxs_x.append(max_idx[0])
+                max_idxs_y.append(max_idx[1])
+            num_objects_separated = num_objects
+            if np.max(max_idxs_y)-np.min(max_idxs_y)<minimum_horizontal_separation:
+                num_objects_separated = 1
+
+                #%
+        max_vals = list()
+        max_idxs = list()
+        max_idxs_x = list()
+        max_idxs_y = list()
+        for peak_num in range(1,num_objects+1):
+            max_val = np.max(im_rfp_filt[labeled==peak_num])
+            
+            slice_x,slice_y = ndimage.find_objects(labeled==peak_num)[0]
+            maxidxes = np.where(im_rfp_filt[slice_x,slice_y]==np.max(im_rfp_filt[slice_x,slice_y]))
+            max_idx = np.asarray(np.mean(maxidxes,1),int)+np.asarray([slice_x.start,slice_y.start])
+            
+            if len(max_idxs_y)==0 or np.abs(max_idxs_y[0]-max_idx[1])>minimum_horizontal_separation:
+                max_vals.append(max_val)
+                max_idxs.append(max_idx)
+                max_idxs_x.append(max_idx[0])
+                max_idxs_y.append(max_idx[1])
+        order = np.argsort(max_vals)[::-1]
+        max_idxs = np.asarray(max_idxs)[order]
+        max_vals = np.asarray(max_vals)[order]
+        for peak_num, (max_idx, max_val) in enumerate(zip(max_idxs,max_vals)):
+            peak_num+=1
+            if peak_num>2:
+                break
+            peak_data[subject_dir]['peak_values_rfp_{}'.format(peak_num)].append(im_rfp_filt[max_idx[0],max_idx[1]])
+            peak_data[subject_dir]['peak_values_fitc_{}'.format(peak_num)].append(im_fitc_filt[max_idx[0],max_idx[1]])
+            peak_data[subject_dir]['peak_idx_x_{}'.format(peak_num)].append(max_idx[0])
+            peak_data[subject_dir]['peak_idx_y_{}'.format(peak_num)].append(max_idx[1])
+            peak_data[subject_dir]['z'].append(z)
+            peak_data[subject_dir]['filename'].append(rfp_file)
+            print('peak_value: {}'.format(max_val))
+            #break
+        if peak_num==0:
+            peak_data[subject_dir]['peak_values_rfp_{}'.format(2)].append(np.nan)
+            peak_data[subject_dir]['peak_values_fitc_{}'.format(2)].append(np.nan)
+            peak_data[subject_dir]['peak_idx_x_{}'.format(2)].append(np.nan)
+            peak_data[subject_dir]['peak_idx_y_{}'.format(2)].append(np.nan)
+        #%
+        fig.clear()
+        ax_rfp=fig.add_subplot(2,2,1)
+        ax_fitc=fig.add_subplot(2,2,2)
+        ax_rfp_filt=fig.add_subplot(2,2,3)
+        ax_fitc_filt=fig.add_subplot(2,2,4)
+        ax_rfp.set_title('anti-GFP')
+        ax_fitc.set_title('native fluorescence')
+        
+        
+        ax_rfp.imshow(im_rfp)
+        ax_rfp_filt.imshow(im_rfp_filt)
+        ax_fitc.imshow(im_fitc)
+        ax_fitc_filt.imshow(im_fitc_filt)   
+        for max_idx in max_idxs:
+            ax_rfp_filt.plot(max_idx[1],max_idx[0],'ro')
+            ax_fitc_filt.plot(max_idx[1],max_idx[0],'ro')
+        fig.savefig(os.path.join(save_base_dir,basename+str(z)+'.jpg'))
+
+# =============================================================================
+#         break
+#     break
+# =============================================================================
 
