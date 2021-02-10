@@ -273,6 +273,8 @@ def collect_ca_wave_traces( ca_wave_parameters,ca_waves_dict,parameters,use_doub
     ca_traces_dict_by_cell = dict()
     for sensor in ca_wave_parameters['sensors']:
         ca_traces_dict[sensor] = {
+                'cawave_rise_times_list':list(),
+                'cawave_peak_amplitudes_dff_list':list(),
                 'cawave_f_corr_list':list(),
                 'cawave_dff_list':list(),
                 'cawave_time_list':list(),
@@ -291,15 +293,27 @@ def collect_ca_wave_traces( ca_wave_parameters,ca_waves_dict,parameters,use_doub
         snr_cond = 'ap_group_min_snr_dv>{}'.format(ca_wave_parameters['min_ap_snr'])
         preisi_cond = 'ap_group_pre_isi>{}'.format(ca_wave_parameters['min_pre_isi'])
         postisi_cond = 'ap_group_post_isi>{}'.format(ca_wave_parameters['min_post_isi'])
-        basline_dff_cond = 'cawave_baseline_dff_global<{}'.format(ca_wave_parameters['max_baseline_dff'])
-        basline_dff_cond_2 = 'cawave_baseline_dff_global>{}'.format(ca_wave_parameters['min_baseline_dff'])
+        if use_doublets:
+            basline_dff_cond = 'doublet_cawave_baseline_dff_global<{}'.format(ca_wave_parameters['max_baseline_dff'])
+            basline_dff_cond_2 = 'doublet_cawave_baseline_dff_global>{}'.format(ca_wave_parameters['min_baseline_dff'])
+            baseline_f_cond = 'doublet_cawave_baseline_f > {}'.format(ca_wave_parameters['minimum_f0_value'])
+            snr_cond = 'ap_doublet_min_snr_dv>{}'.format(ca_wave_parameters['min_ap_snr'])
+            preisi_cond = 'ap_doublet_pre_isi>{}'.format(ca_wave_parameters['min_pre_isi'])
+            postisi_cond = 'ap_doublet_post_isi>{}'.format(ca_wave_parameters['min_post_isi'])
+        else:
+            basline_dff_cond = 'cawave_baseline_dff_global<{}'.format(ca_wave_parameters['max_baseline_dff'])
+            basline_dff_cond_2 = 'cawave_baseline_dff_global>{}'.format(ca_wave_parameters['min_baseline_dff'])
+            baseline_f_cond = 'cawave_baseline_f > {}'.format(ca_wave_parameters['minimum_f0_value'])
+            snr_cond = 'ap_group_min_snr_dv>{}'.format(ca_wave_parameters['min_ap_snr'])
+            preisi_cond = 'ap_group_pre_isi>{}'.format(ca_wave_parameters['min_pre_isi'])
+            postisi_cond = 'ap_group_post_isi>{}'.format(ca_wave_parameters['min_post_isi'])
         ephys_snr_cond = 'sweep_ap_snr_dv_median>={}'.format(ca_wave_parameters['min_sweep_ap_snr_dv_median'])
         ephys_hwstd_cond = 'sweep_ap_hw_std_per_median<={}'.format(ca_wave_parameters['max_sweep_ap_hw_std_per_median'])
-        baseline_f_cond = 'cawave_baseline_f > {}'.format(ca_wave_parameters['minimum_f0_value'])
+        
         channel_offset_cond = 'channel_offset > {}'.format(ca_wave_parameters['min_channel_offset'])
         
         if use_doublets:
-            cawaves_all = imaging.MovieChannel()*ephysanal_cell_attached.SweepAPQC()*imaging_gt.ROIDwellTime()*imaging.ROI()*imaging.MoviePowerPostObjective()*imaging.MovieMetaData()*imaging.MovieNote()*imaging_gt.SessionCalciumSensor()*ephysanal_cell_attached.APDoublet()*imaging_gt.CalciumWave.DoubletCalciumWaveProperties()*imaging_gt.DoubletCalciumWave()*imaging_gt.DoubletCalciumWave.DoubletCalciumWaveNeuropil()&'movie_note_type = "quality"'
+            cawaves_all = imaging.MovieChannel()*ephysanal_cell_attached.SweepAPQC()*imaging_gt.ROIDwellTime()*imaging.ROI()*imaging.MoviePowerPostObjective()*imaging.MovieMetaData()*imaging.MovieNote()*imaging_gt.SessionCalciumSensor()*ephysanal_cell_attached.APDoublet()*imaging_gt.DoubletCalciumWave.DoubletCalciumWaveProperties()*imaging_gt.DoubletCalciumWave()*imaging_gt.DoubletCalciumWave.DoubletCalciumWaveNeuropil()&'movie_note_type = "quality"'
         else:
             cawaves_all = imaging.MovieChannel()*ephysanal_cell_attached.SweepAPQC()*imaging_gt.ROIDwellTime()*imaging.ROI()*imaging.MoviePowerPostObjective()*imaging.MovieMetaData()*imaging.MovieNote()*imaging_gt.SessionCalciumSensor()*ephysanal_cell_attached.APGroup()*imaging_gt.CalciumWave.CalciumWaveProperties()*imaging_gt.CalciumWave()*imaging_gt.CalciumWave.CalciumWaveNeuropil()&'movie_note_type = "quality"'
     
@@ -326,6 +340,8 @@ def collect_ca_wave_traces( ca_wave_parameters,ca_waves_dict,parameters,use_doub
                 cawaves = cawaves&'movie_note = "1"'
             if len(cawaves) == 0:
                 continue
+            cawave_rise_times_list = list()
+            cawave_peak_amplitudes_dff_list = list()
             cawave_f_corr_list = list()
             cawave_dff_list  = list()
             cawave_time_list = list()
@@ -335,15 +351,16 @@ def collect_ca_wave_traces( ca_wave_parameters,ca_waves_dict,parameters,use_doub
             cawave_snr_list = list()
             cawave_f_corr_normalized_list = list()
             if use_doublets:
-                cawave_fs,cawave_times,cawave_fneus,cawave_f0s,cawave_rneus,ap_group_start_time,ap_group_length,cawave_snrs,cawave_peak_amplitude_fs,cawave_peak_amplitude_dffs = (cawaves&'ap_group_ap_num={}'.format(parameters['ap_num_to_plot'])).fetch('doublet_cawave_f','doublet_cawave_time','doublet_cawave_fneu','doublet_awave_baseline_f','doublet_cawave_rneu','ap_doublet_start_time','ap_doublet_length','doublet_cawave_snr','doublet_cawave_peak_amplitude_f','doublet_cawave_peak_amplitude_dff')
+                cawave_fs,cawave_times,cawave_fneus,cawave_f0s,cawave_rneus,ap_group_start_time,ap_group_length,cawave_snrs,cawave_peak_amplitude_fs,cawave_peak_amplitude_dffs,cawave_rise_times = cawaves.fetch('doublet_cawave_f','doublet_cawave_time','doublet_cawave_fneu','doublet_cawave_baseline_f','doublet_cawave_rneu','ap_doublet_start_time','ap_doublet_length','doublet_cawave_snr','doublet_cawave_peak_amplitude_f','doublet_cawave_peak_amplitude_dff','doublet_cawave_rise_time')
                 ap_group_end_time = np.asarray(ap_group_start_time,float)+np.asarray(ap_group_length,float)
             else:
-                cawave_fs,cawave_times,cawave_fneus,cawave_f0s,cawave_rneus,ap_group_start_time,ap_group_end_time,cawave_snrs,cawave_peak_amplitude_fs,cawave_peak_amplitude_dffs = (cawaves&'ap_group_ap_num={}'.format(parameters['ap_num_to_plot'])).fetch('cawave_f','cawave_time','cawave_fneu','cawave_baseline_f','cawave_rneu','ap_group_start_time','ap_group_end_time','cawave_snr','cawave_peak_amplitude_f','cawave_peak_amplitude_dff')
+                cawave_fs,cawave_times,cawave_fneus,cawave_f0s,cawave_rneus,ap_group_start_time,ap_group_end_time,cawave_snrs,cawave_peak_amplitude_fs,cawave_peak_amplitude_dffs,cawave_rise_times = (cawaves&'ap_group_ap_num={}'.format(parameters['ap_num_to_plot'])).fetch('cawave_f','cawave_time','cawave_fneu','cawave_baseline_f','cawave_rneu','ap_group_start_time','ap_group_end_time','cawave_snr','cawave_peak_amplitude_f','cawave_peak_amplitude_dff','cawave_rise_time')
             ap_group_lengths = np.asarray(ap_group_end_time,float)-np.asarray(ap_group_start_time,float)
-            for cawave_f,cawave_time,cawave_fneu,cawave_f0,cawave_rneu,ap_group_length,cawave_snr,cawave_peak_amplitude_f in zip(cawave_fs,cawave_times,cawave_fneus,cawave_f0s,cawave_rneus,ap_group_lengths,cawave_snrs,cawave_peak_amplitude_fs ):
+            for cawave_f,cawave_time,cawave_fneu,cawave_f0,cawave_rneu,ap_group_length,cawave_snr,cawave_peak_amplitude_f, cawave_peak_amplitude_dff,cawave_rise_time in zip(cawave_fs,cawave_times,cawave_fneus,cawave_f0s,cawave_rneus,ap_group_lengths,cawave_snrs,cawave_peak_amplitude_fs,cawave_peak_amplitude_dffs ,cawave_rise_times):
                 cawave_f_corr = cawave_f-cawave_fneu*cawave_rneu-cawave_f0
                 cawave_dff = (cawave_f_corr)/cawave_f0
                 #zeroidx = np.argmin(np.abs(cawave_time))
+                cawave_peak_amplitudes_dff_list.append(cawave_peak_amplitude_dff)
                 cawave_lengths.append(len(cawave_dff))
                 cawave_f_corr_list.append(np.asarray(cawave_f_corr,float))
                 cawave_dff_list.append(np.asarray(cawave_dff,float))
@@ -352,10 +369,13 @@ def collect_ca_wave_traces( ca_wave_parameters,ca_waves_dict,parameters,use_doub
                 cawave_ap_group_length_list.append(ap_group_length)
                 cawave_snr_list.append(cawave_snr)
                 cawave_f_corr_normalized_list.append(np.asarray(cawave_f_corr,float)/cawave_peak_amplitude_f)
+                cawave_rise_times_list.append(cawave_rise_time)
             if len(np.unique(cawave_lengths))>1:
                 print('not equal traces')
                 #time.sleep(1000)
-            cell_dict = {'cawave_f_corr_list':cawave_f_corr_list,
+            cell_dict = {'cawave_rise_times_list':cawave_rise_times_list,
+                         'cawave_peak_amplitudes_dff_list':cawave_peak_amplitudes_dff_list,
+                         'cawave_f_corr_list':cawave_f_corr_list,
                          'cawave_dff_list':cawave_dff_list,
                          'cawave_time_list':cawave_time_list,
                          'cawave_lengths':cawave_lengths,
@@ -365,6 +385,8 @@ def collect_ca_wave_traces( ca_wave_parameters,ca_waves_dict,parameters,use_doub
                          'cawave_snr_list':cawave_snr_list,
                          'cawave_f_corr_normalized_list':cawave_f_corr_normalized_list}
             ca_traces_by_cell_list.append(cell_dict)
+            ca_traces_dict[sensor]['cawave_rise_times_list'].extend(cawave_rise_times_list)
+            ca_traces_dict[sensor]['cawave_peak_amplitudes_dff_list'].extend(cawave_peak_amplitudes_dff_list)
             ca_traces_dict[sensor]['cawave_f_corr_list'].extend(cawave_f_corr_list)
             ca_traces_dict[sensor]['cawave_dff_list'].extend(cawave_dff_list)
             ca_traces_dict[sensor]['cawave_time_list'].extend(cawave_time_list)
