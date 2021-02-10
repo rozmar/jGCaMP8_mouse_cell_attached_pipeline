@@ -225,12 +225,17 @@ class IngestAPGroup(dj.Imported):
     -> ephys_cell_attached.Sweep
     ---
     ap_group_complete : int
+    ap_group_min_baselime_time : double
+    ap_group_max_integration_time : double
     """
     def make(self, key):
         key_original = key.copy()
         key_original['ap_group_complete'] = 1
         min_baseline_time = .1
-        max_integration_time = .02 #.1 for pyramidal cells
+        max_integration_time = .1 #.1 for pyramidal cells 
+        key_original['ap_group_min_baselime_time'] = min_baseline_time
+        key_original['ap_group_max_integration_time'] = max_integration_time
+        
         
         sweep_numbers = (ephys_cell_attached.Sweep()&key).fetch('sweep_number')
         apgroup_list = list()
