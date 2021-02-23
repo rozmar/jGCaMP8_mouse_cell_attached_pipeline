@@ -41,8 +41,22 @@ class EphysCellType(dj.Computed):
                 key['ephys_cell_type'] = 'pyr'
 
         self.insert1(key,skip_duplicates=True)
-        
-        
+
+@schema
+class CellMeanFiringRate(dj.Computed):
+    definition = """
+    -> ephys_cell_attached.Cell
+    ---
+    cell_mean_firing_rate : double
+    """
+    def make(self, key):     
+        #%
+        #key = {'subject_id':471991,'session':1,'cell_number':1}
+        sweep_start_time,sweep_end_time = (ephys_cell_attached.Sweep()&key).fetch('sweep_start_time','sweep_end_time')
+        recording_len = sum(np.asarray(sweep_end_time-sweep_start_time,float))
+        apnum = len(ActionPotential()&key)
+        key['cell_mean_firing_rate'] = apnum/recording_len
+        self.insert1(key,skip_duplicates=True)
     #%
 @schema
 class ActionPotential(dj.Computed):
