@@ -15,7 +15,88 @@ def gaussFilter(sig,sRate,sigma = .00005):
     #sigma = .00005
     sig_f = ndimage.gaussian_filter(sig,sigma/si)
     return sig_f
-#%%
+# =============================================================================
+# #%%
+# # CellBaselineFluorescence(dj.Computed)    
+# @schema
+# class CellBaselineFluorescence(dj.Computed):#compensate f0 with depth and red channel spill, average over movies. (std..power dependence..?)
+#     definition = """
+#     -> ephys_cell_attached.Cell
+#     ---
+#     ephys_cell_type : varchar(20) # pyr / int / unidentified
+#     """
+#     def make(self, key):
+#         #%%
+#     counter = 0
+#     for key in ephys_cell_attached.Cell():
+#         counter += 1
+#         #%%
+#         key = {'subject_id':471991,
+#                'session':1,
+#                'cell_number':1}
+#         
+#         variablestoget = ['roi_f_min',
+#                           'roi_f_max',
+#                           'roi_f_median',
+#                           'movie_power',
+#                           'movie_depth',
+#                           ]
+#         
+#         data = (imaging_gt.MovieDepth()*imaging_gt.ROISweepCorrespondance()*imaging.ROITrace()*imaging.MoviePowerPostObjective()&key&'channel_number = 1').fetch(*variablestoget)
+#         data_dict = dict()
+#         for data_now,variable in zip(data,variablestoget):
+#             data_dict[variable] = np.asarray(data_now,float)
+#         neuropilvariablestoget = ['neuropil_f_min',
+#                                   'neuropil_f_max',
+#                                   'neuropil_f_median']
+#         data_neuropil = (imaging_gt.ROISweepCorrespondance()*imaging.ROINeuropilTrace()&key&'channel_number = 2'&'neuropil_number = 1').fetch(*neuropilvariablestoget)
+#         for data_now,variable in zip(data_neuropil,neuropilvariablestoget):
+#             data_dict[variable] = np.asarray(data_now,float)
+#         
+#         power = data_dict['movie_power']
+#         varnames = list(data_dict.keys())
+#         for varname in varnames:
+#             if 'roi' in varname or 'neuropil' in varname:
+#                 data_dict['{}_{}'.format(varname,'corr')]=data_dict[varname]/(power**2)*40**2
+#                 
+#         plt.plot(data_dict['neuropil_f_min_corr'],data_dict['roi_f_min_corr'],'ko')
+#         #%%
+#         if counter == 10000:
+#             break
+# =============================================================================
+#%
+@schema
+class CellBaselineFluorescence(dj.Computed):
+    definition = """# 
+    -> ephys_cell_attached.Cell
+    ---
+    cell_baseline_roi_f0_median = null          : double # power corrected median fluorescence during resting - neuropil subtracted    
+    cell_baseline_roi_f0_mean = null          : double # power corrected mean fluorescence during resting - neuropil subtracted    
+    cell_baseline_roi_f0_std = null          : double # std of power corrected fluorescence during resting - neuropil subtracted    
+    """
+    def make(self, key):
+        #%
+        #key = {'subject_id':471991,'session':1,'cell_number':3}
+        key_extra = {'channel_number':1,
+                     'roi_type':'Suite2P',
+                     'motion_correction_method':'Suite2P',
+                     'roi_type':'Suite2P',
+                     'neuropil_number':1,
+                     'neuropil_subtraction':'0.8',
+                     'gaussian_filter_sigma':10
+                     }
+        isis, baselines, power= (ephysanal_cell_attached.APGroup()*CalciumWave.CalciumWaveProperties()*imaging.MoviePowerPostObjective()&key&key_extra).fetch('ap_group_pre_isi','cawave_baseline_f','movie_power') #imaging_gt
+        power = np.asarray(power,float)
+        baselines_corrected = (baselines*power**2)/40**2
+        if sum(isis>2)>5:
+            order = np.argsort(isis)[::-1]
+            key['cell_baseline_roi_f0_median'] = np.median(baselines_corrected[order][:np.min([10,sum(isis>2)])])
+            key['cell_baseline_roi_f0_mean'] = np.mean(baselines_corrected[order][:np.min([10,sum(isis>2)])])
+            key['cell_baseline_roi_f0_std'] = np.std(baselines_corrected[order][:np.min([10,sum(isis>2)])])
+        self.insert1(key,skip_duplicates=True)
+        #plt.plot(isis,baselines_corrected,'ko')
+        #%
+
 
 @schema
 class MovieDepth(dj.Computed):
@@ -48,7 +129,7 @@ class MovieCalciumWaveSNR(dj.Computed):
     ---
     movie_event_num                   : int     #only events with given minimum inter-event intervals
     movie_ap_num                      : double  #only in the events
-    movie_total_ap_num                    : double  #only in the events
+    movie_total_ap_num                : double  # all APs in the movie
     movie_mean_cawave_snr_per_ap      : double  
     movie_median_cawave_snr_per_ap    : double
     movie_mean_ap_snr                 : double
@@ -415,7 +496,7 @@ class IngestCalciumWave(dj.Computed):
         ca_wave_time_back_for_baseline = .2
         ca_wave_time_forward = 3
         global_f0_time = 10 #seconds
-        max_rise_time = .08 #seconds to find maximum after last AP in a group # 0.1 for pyr
+        max_rise_time = .1 #seconds to find maximum after last AP in a group # 0.1 for pyr
         gaussian_filter_sigmas = CalciumWaveFilter().fetch('gaussian_filter_sigma')#imaging_gt.
         neuropil_subtractions = CalciumWaveNeuropilHandling().fetch('neuropil_subtraction')#imaging_gt.
         groundtruth_rois = ROISweepCorrespondance()&key#imaging_gt.
