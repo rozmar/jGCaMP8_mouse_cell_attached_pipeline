@@ -1,9 +1,301 @@
 import matplotlib.pyplot as plt
-from utils import utils_plot
+from utils import utils_plot, utils_ephys
 import numpy as np
 import os 
 import subprocess
 import seaborn as sns
+import datajoint as dj
+dj.conn()
+from pipeline import pipeline_tools,lab, experiment, ephys_cell_attached,ephysanal_cell_attached, imaging, imaging_gt
+from matplotlib.lines import Line2D
+
+
+def plot_r_neu_distribution(sensor_colors,ca_wave_parameters,plot_parameters):
+    #%%
+    depth_fit_x = np.arange(50,200)
+    depth_fit_order = 1
+    radius_fit_x = np.arange(5,20)
+    radius_fit_order = 1
+    min_rneu_corrcoeff = .7
+    fig = plt.figure(figsize = [15,10])
+    ax_hist_rneu = fig.add_subplot(2,2,1)
+    ax_cumhist_rneu = ax_hist_rneu.twinx()
+    ax_depth_rneu = fig.add_subplot(2,2,2)
+    ax_radius_rneu = fig.add_subplot(2,2,3)
+    ax_radius_depth = fig.add_subplot(2,2,4)
+    rneu_histogram_step = .1
+    
+    
+    #rneu_all = (imaging_gt.SessionCalciumSensor()*imaging_gt.ROINeuropilCorrelation()&'r_neu_corrcoeff>.7'&'channel_number=1'&'neuropil_number = 1').fetch('r_neu')
+    bar_width = rneu_histogram_step*.9#/len(ca_wave_parameters['sensors'])*.9
+    hist_range = np.arange(.2,2+rneu_histogram_step,rneu_histogram_step)
+    cum_hist_range = np.arange(.2,2+.1,.01)
+    #for sensor in sensor_colors.keys():
+    ys = list()
+    cum_ys = list()
+    rneu_all = list()
+    depth_all = list()
+    for sensor in ca_wave_parameters['sensors']:
+        data,depth,roi_radius,movie_pixel_size = (imaging.Movie()*imaging.ROI()*imaging.MoviePowerPostObjective()*imaging_gt.MovieDepth()*imaging_gt.SessionCalciumSensor()*imaging_gt.ROINeuropilCorrelation()&'r_neu_corrcoeff>{}'.format(min_rneu_corrcoeff)&'channel_number=1'&'neuropil_number = 1'&'session_calcium_sensor = "{}"'.format(sensor)).fetch('r_neu','movie_depth','roi_radius','movie_pixel_size')#'movie_depth'movie_power
+        
+        cell_radius = roi_radius*np.asarray(movie_pixel_size,float)
+        needed = (np.isnan(depth)==False) & (np.isnan(data)==False) &(data<=2) &(cell_radius<12)
+        rneu_all.extend(data[needed])
+        depth_all.extend(depth[needed])
+        y,x = np.histogram(data,hist_range)
+        y_cum,x_cum = np.histogram(data,cum_hist_range)
+        cum_ys.append(y_cum)
+        ys.append(y)
+        p=np.polyfit(depth[needed],data[needed],depth_fit_order)
+        ax_depth_rneu.plot(depth,data,'o',color = sensor_colors[sensor],alpha = .3)
+        ax_depth_rneu.plot(depth_fit_x,np.polyval(p,depth_fit_x),'-',color = sensor_colors[sensor])
+        
+        
+        p=np.polyfit(depth[needed],cell_radius[needed],depth_fit_order)
+        ax_radius_depth.plot(depth,cell_radius,'o',color = sensor_colors[sensor],alpha = .3)
+        ax_radius_depth.plot(depth_fit_x,np.polyval(p,depth_fit_x),'-',color = sensor_colors[sensor])
+        
+        p=np.polyfit(cell_radius[needed],data[needed],depth_fit_order)
+        ax_radius_rneu.plot(cell_radius,data,'o',color = sensor_colors[sensor],alpha = .3)
+        ax_radius_rneu.plot(radius_fit_x,np.polyval(p,radius_fit_x),'-',color = sensor_colors[sensor])
+    hist_bins = np.mean([hist_range[:-1],hist_range[1:]],0)
+    cum_hist_bins = np.mean([cum_hist_range[:-1],cum_hist_range[1:]],0)
+    bottoms = np.zeros(len(hist_bins))
+    for i,sensor in enumerate(sensor_colors.keys()):
+        ax_hist_rneu.bar(hist_bins, ys[i], bar_width,bottom=bottoms, color= sensor_colors[sensor],alpha = .3)#-plot_parameters['event_histogram_step']/2+bar_width*i
+        ax_cumhist_rneu.plot(cum_hist_bins, np.cumsum(cum_ys[i])/sum(cum_ys[i]), color= sensor_colors[sensor],linewidth = 2)#-plot_parameters['event_histogram_step']/2+bar_width*i
+        bottoms = ys[i]+bottoms 
+    ax_cumhist_rneu.set_ylim([0,1])
+    ax_hist_rneu.set_xlabel('calculated r_neu using ground truth ephys')
+    ax_hist_rneu.set_ylabel('number of ROIs')
+    
+    p=np.polyfit(depth_all,rneu_all,depth_fit_order)
+    ax_depth_rneu.plot(depth_fit_x,np.polyval(p,depth_fit_x),'k-',linewidth = 5)
+    ax_depth_rneu.set_xlabel('depth from surface of pia (microns)')
+    ax_depth_rneu.set_ylabel('calculated r_neu using ground truth ephys')
+    ax_depth_rneu.set_ylim([.25,2])
+    legend_elements = list()
+    for sensor in sensor_colors.keys():
+        legend_elements.append(Line2D([0], [0], marker='o', color=sensor_colors[sensor], 
+                                      label=sensor,markerfacecolor=sensor_colors[sensor], markersize=8))
+    ax_hist_rneu.legend(handles=legend_elements)   
+    
+    figfile = os.path.join(plot_parameters['figures_dir'],plot_parameters['fig_name']+'.{}')
+    fig.savefig(figfile.format('svg'))
+    inkscape_cmd = ['/usr/bin/inkscape', '--file',figfile.format('svg'),'--export-emf', figfile.format('emf')]
+    subprocess.run(inkscape_cmd )
+    
+    
+
+def plot_stats(plot_properties,inclusion_criteria):
+    ephys_snr_cond = 'sweep_ap_snr_dv_median>={}'.format(inclusion_criteria['min_sweep_ap_snr_dv_median'])
+    ephys_hwstd_cond = 'sweep_ap_hw_std_per_median<={}'.format(inclusion_criteria['max_sweep_ap_hw_std_per_median'])
+    channel_offset_cond = 'channel_offset > {}'.format(inclusion_criteria['min_channel_offset'])
+    channel_num_cond = 'channel_number = 1'
+    
+    sensornames = list()
+    for sensor in plot_properties['sensors']:
+        sensornames.append(plot_properties['sensor_names'][sensor])
+    fig_exptime_movielen = plt.figure()
+    ax_exptime_movielen = fig_exptime_movielen.add_subplot(1,1,1)
+    fig_stats = plt.figure(figsize = [25,15])
+    ax_subject_num = fig_stats.add_subplot(2,2,1)
+    ax_subject_expression_time = ax_subject_num.twinx()
+    ax_cell_num = fig_stats.add_subplot(2,2,2)
+    ax_cell_num_per_subject = ax_cell_num.twinx()
+    ax_movie_lengths_with_gt = fig_stats.add_subplot(2,2,3)
+    ax_movie_lengths_with_gt_per_scell = ax_movie_lengths_with_gt.twinx()
+    ax_ap_number = fig_stats.add_subplot(2,2,4)
+    ax_ap_number_per_cell = ax_ap_number.twinx()
+    linewidth = 3
+    markersize = 4
+    alpha = .2
+    swarm_apnum_x = list()
+    swarm_apnum_y = list()
+    swarm_movielen_x = list()
+    swarm_movielen_y = list()
+    swarm_cellnum_x = list()
+    swarm_cellnum_y = list()
+    swarm_exptime_x = list()
+    swarm_exptime_y = list()
+    for sensor_i,sensor in enumerate(plot_properties['sensors']):
+        sensor_filter = 'session_calcium_sensor = "{}"'.format(sensor)
+        expression_time_filter = 'session_sensor_expression_time < {}'.format(plot_properties['max_expression_time'])
+        sessions = lab.Subject()*imaging_gt.SessionCalciumSensor() & sensor_filter & expression_time_filter# sessions = subjects
+        cells = ephys_cell_attached.Cell()*imaging_gt.SessionCalciumSensor() & sensor_filter & expression_time_filter
+        #movies = imaging.Movie()*imaging_gt.SessionCalciumSensor() & sensor_filter & expression_time_filter
+        movies_with_gt_roi = ephysanal_cell_attached.SweepAPQC()*imaging.MovieChannel()*imaging.Movie()*imaging_gt.SessionCalciumSensor()*imaging_gt.ROISweepCorrespondance() & sensor_filter & expression_time_filter& ephys_snr_cond&ephys_hwstd_cond&channel_offset_cond&channel_num_cond
+        action_potentials = ephysanal_cell_attached.SweepAPQC()*imaging.MovieChannel()*ephysanal_cell_attached.ActionPotential()*imaging_gt.SessionCalciumSensor()*imaging_gt.ROISweepCorrespondance() & sensor_filter & expression_time_filter & ephys_snr_cond&ephys_hwstd_cond&channel_offset_cond&channel_num_cond
+        cells_per_subject = list()
+        for session in sessions:
+            cells_per_subject.append(len(np.unique((imaging_gt.ROISweepCorrespondance()&session).fetch('cell_number'))))#len(cells&session)
+        
+        movie_lengths_per_cell_with_gt_roi = list()
+        ap_number_per_cell = list()
+        expression_time_per_cell = list()
+        cell_num = 0
+        for cell in cells:
+            if len(movies_with_gt_roi&cell) > 0:
+                cell_num += 1
+                movie_frame_rates,movie_frame_nums,expression_times = (movies_with_gt_roi&cell).fetch('movie_frame_rate','movie_frame_num','session_sensor_expression_time')
+                movie_lengths_per_cell_with_gt_roi.append(np.sum(movie_frame_nums/movie_frame_rates))
+                expression_time_per_cell.append(np.mean(expression_times))
+                ap_number_per_cell.append(len(action_potentials&cell))
+    
+        movie_lengths_per_cell_with_gt_roi = np.asarray(movie_lengths_per_cell_with_gt_roi)
+        
+        ax_exptime_movielen.plot(expression_time_per_cell,movie_lengths_per_cell_with_gt_roi/60,'o',color = plot_properties['sensor_colors'][sensor],markersize = markersize,alpha=alpha)
+        
+    
+        subject_num = len(sessions) # subject = sessions because it's a terminal experiment
+        expression_time = sessions.fetch('session_sensor_expression_time')
+        ax_subject_num.bar(sensor_i,subject_num,edgecolor = plot_properties['sensor_colors'][sensor],fill=False,linewidth = linewidth)
+        #ax_subject_expression_time.plot(np.ones(subject_num)*sensor_i,expression_time,'o',color = plot_properties['sensor_colors'][sensor],markersize = markersize,alpha=alpha)
+        swarm_exptime_x.append(np.ones(len(expression_time))*sensor_i)
+        swarm_exptime_y.append(expression_time)
+        
+        #cell_num = len(cells)
+        ax_cell_num.bar(sensor_i,cell_num,edgecolor = plot_properties['sensor_colors'][sensor],fill=False,linewidth = linewidth)
+        #ax_cell_num_per_subject.plot(np.ones(subject_num)*sensor_i,cells_per_subject,'o',color = plot_properties['sensor_colors'][sensor],markersize = markersize,alpha=alpha)
+        swarm_cellnum_x.append(np.ones(len(cells_per_subject))*sensor_i)
+        swarm_cellnum_y.append(cells_per_subject)
+        
+        
+        ax_movie_lengths_with_gt.bar(sensor_i,np.sum(movie_lengths_per_cell_with_gt_roi)/3600,edgecolor = plot_properties['sensor_colors'][sensor],fill=False,linewidth = linewidth)
+        #ax_movie_lengths_with_gt_per_scell.plot(np.ones(cell_num)*sensor_i,movie_lengths_per_cell_with_gt_roi/60,'o',color = plot_properties['sensor_colors'][sensor],markersize = markersize,alpha=alpha)
+        swarm_movielen_x.append(np.ones(len(movie_lengths_per_cell_with_gt_roi))*sensor_i)
+        swarm_movielen_y.append(movie_lengths_per_cell_with_gt_roi/60)
+        
+        ax_ap_number.bar(sensor_i,np.sum(ap_number_per_cell)/1000,edgecolor = plot_properties['sensor_colors'][sensor],fill=False,linewidth = linewidth)
+        swarm_apnum_x.append(np.ones(len(ap_number_per_cell))*sensor_i)
+        swarm_apnum_y.append(ap_number_per_cell)
+        #ax_ap_number_per_cell.plot(np.ones(cell_num)*sensor_i,ap_number_per_cell,'o',color = plot_properties['sensor_colors'][sensor],markersize = markersize,alpha=alpha)
+        #sns.swarmplot(x =np.ones(cell_num)*sensor_i,y =ap_number_per_cell ,color=plot_properties['sensor_colors'][sensor],ax = ax_ap_number_per_cell)
+        #break
+        #break
+    #%
+    sns.swarmplot(x =np.concatenate(swarm_exptime_x),y =np.concatenate(swarm_exptime_y) ,color='black',ax = ax_subject_expression_time)  
+    sns.swarmplot(x =np.concatenate(swarm_cellnum_x),y =np.concatenate(swarm_cellnum_y) ,color='black',ax = ax_cell_num_per_subject)  
+    sns.swarmplot(x =np.concatenate(swarm_movielen_x),y =np.concatenate(swarm_movielen_y) ,color='black',ax = ax_movie_lengths_with_gt_per_scell)  
+    ax_ap_number_per_cell.set_yscale('log')
+    x = np.concatenate(swarm_apnum_x)
+    y = np.concatenate(swarm_apnum_y)
+    sns.swarmplot(x =x[y>0],y =y[y>0] ,color='black',ax = ax_ap_number_per_cell)  
+    ax_ap_number_per_cell.set_ylim([10,100000])
+    #%
+    ax_subject_num.set_xticks(np.arange(len(plot_properties['sensors'])))
+    ax_subject_num.set_xticklabels(sensornames)
+    ax_subject_num.set_ylabel('Number of mice per sensor')
+    ax_subject_expression_time.set_ylabel('Expression time (days)')
+    
+    ax_cell_num.set_xticks(np.arange(len(plot_properties['sensors'])))
+    ax_cell_num.set_xticklabels(sensornames)
+    ax_cell_num.set_ylabel('Number of cells per sensor')
+    ax_cell_num_per_subject.set_ylabel('Cell number per mouse')
+    
+    ax_movie_lengths_with_gt.set_xticks(np.arange(len(plot_properties['sensors'])))
+    ax_movie_lengths_with_gt.set_xticklabels(sensornames)
+    ax_movie_lengths_with_gt.set_ylabel('Total length of movies(hr)')
+    ax_movie_lengths_with_gt_per_scell.set_ylabel('Length of movies per cell (min)')
+    ax_movie_lengths_with_gt_per_scell.set_ylim([0,ax_movie_lengths_with_gt_per_scell.get_ylim()[1]])
+    
+    
+    ax_ap_number.set_xticks(np.arange(len(plot_properties['sensors'])))
+    ax_ap_number.set_xticklabels(sensornames)
+    ax_ap_number.set_ylabel('Total number of APs (x1000)')
+    ax_ap_number_per_cell.set_ylabel('Number of APs per cell')
+    
+    ax_exptime_movielen.set_xlabel('Expression time (days)')
+    ax_exptime_movielen.set_ylabel('Length of movies per cell (min)')
+    
+    figfile = os.path.join(plot_properties['figures_dir'],plot_properties['fig_name']+'.{}')
+    fig_stats.savefig(figfile.format('svg'))
+    inkscape_cmd = ['/usr/bin/inkscape', '--file',figfile.format('svg'),'--export-emf', figfile.format('emf')]
+    subprocess.run(inkscape_cmd )
+    
+def plot_ap_scatter_with_third_parameter(ca_waves_dict,plot_parameters):
+    #%%
+    x_list = list()
+    y_list = list()
+    z_list = list()
+    x_per_sensor = dict()
+    y_per_sensor = dict()
+    z_per_sensor = dict()
+    for sensor in plot_parameters['sensors']:
+        x_per_sensor[sensor] = list()
+        y_per_sensor[sensor] = list()
+        z_per_sensor[sensor] = list()
+        for cell in ca_waves_dict[sensor]:
+            idx = cell['ap_group_ap_num_mean_per_ap'] == plot_parameters['ap_num_to_plot']
+            x = np.mean(cell[plot_parameters['x_parameter']])
+            y = np.mean(cell[plot_parameters['y_parameter']])
+            try:
+                z = cell[plot_parameters['z_parameter']][idx]
+            except:
+                z = cell[plot_parameters['z_parameter']][0]
+            
+            x_list.append(x)
+            y_list.append(y)
+            try:
+                z_list.extend(z)
+            except:
+                z_list.append(z)
+            
+            x_per_sensor[sensor].append(x)
+            y_per_sensor[sensor].append(y)
+            try:
+                z_per_sensor[sensor].extend(z)
+            except:
+                z_per_sensor[sensor].append(z)
+    x_list = np.asarray(x_list)       
+    y_list = np.asarray(y_list)       
+    z_list = np.asarray(z_list)    
+    
+    z_edges = np.percentile(z_list,plot_parameters['z_parameter_percentiles'])
+    #print(z_edges)
+    ms_edges = plot_parameters['markersize_edges']
+    fig_ephys_scatter = plt.figure(figsize = [10,5])
+    ax_ephys_scatter =     fig_ephys_scatter.add_subplot(1,1,1)
+    for sensor in plot_parameters['sensors']:
+        if plot_parameters['normalize z by sensor']:
+            z_edges = np.percentile(z_per_sensor[sensor],plot_parameters['z_parameter_percentiles'])
+        for x,y,z in zip(x_per_sensor[sensor],y_per_sensor[sensor],z_per_sensor[sensor]):
+            if z<z_edges[0]:
+                z = z_edges[0]
+            elif z>z_edges[1]:
+                z = z_edges[1]
+            ms = (z-z_edges[0])/np.diff(z_edges)*ms_edges[1]+ms_edges[0]
+            if plot_parameters['invert y axis']:
+                if y<.1:
+                    y=.1
+                #y[y<.001] = .001
+                ax_ephys_scatter.plot(x,1/y,'o',color = plot_parameters['sensor_colors'][sensor],markersize = ms,alpha = plot_parameters['alpha'])
+            else:
+                ax_ephys_scatter.plot(x,y,'o',color = plot_parameters['sensor_colors'][sensor],markersize = ms,alpha = plot_parameters['alpha'])
+    #ax_ephys_scatter.plot(x_list,y_list,'ko')
+    legend_elements = list()
+    for sensor in plot_parameters['sensors']:
+        legend_elements.append(Line2D([0], [0], marker='o', color='white',#plot_parameters['sensor_colors'][sensor], 
+                                      label=sensor,markerfacecolor=plot_parameters['sensor_colors'][sensor], markersize=8))
+    legend_elements.append(Line2D([0], [0], marker='o', color = 'white',
+                                      label='{} {}'.format(int(np.ceil(z_edges[0])),plot_parameters['z_parameter_unit']),markerfacecolor='black', markersize=(np.ceil(z_edges[0])-z_edges[0])/np.diff(z_edges)*ms_edges[1]+ms_edges[0]))
+    legend_elements.append(Line2D([0], [0], marker='o',color = 'white',
+                                      label='{} {}'.format(int(np.ceil(z_edges[1])),plot_parameters['z_parameter_unit']),markerfacecolor='black', markersize=(np.ceil(z_edges[1])-z_edges[0])/np.diff(z_edges)*ms_edges[1]+ms_edges[0]))
+    ax_ephys_scatter.legend(handles=legend_elements)     
+    ax_ephys_scatter.set_xlabel(plot_parameters['x_parameter'])
+    ax_ephys_scatter.set_ylabel(plot_parameters['y_parameter'])
+    ax_ephys_scatter.set_title(plot_parameters['z_parameter'])
+    if 'xlim' in plot_parameters.keys():
+        ax_ephys_scatter.set_xlim(plot_parameters['xlim'])
+    if 'xlabel' in plot_parameters.keys():
+        ax_ephys_scatter.set_xlabel(plot_parameters['xlabel'])
+    if 'ylabel' in plot_parameters.keys():
+        ax_ephys_scatter.set_ylabel(plot_parameters['ylabel'])
+    figfile = os.path.join(plot_parameters['figures_dir'],plot_parameters['fig_name']+'.{}')
+    fig_ephys_scatter.savefig(figfile.format('svg'))
+    inkscape_cmd = ['/usr/bin/inkscape', '--file',figfile.format('svg'),'--export-emf', figfile.format('emf')]
+    subprocess.run(inkscape_cmd )
+ #%%       
 
 def plot_superresolution_grand_averages(superresolution_traces,plot_parameters):
     fig_grand_average_traces_pyr = plt.figure()
@@ -47,7 +339,7 @@ def plot_superresolution_grand_averages(superresolution_traces,plot_parameters):
     inkscape_cmd = ['/usr/bin/inkscape', '--file',figfile.format('svg'),'--export-emf', figfile.format('emf')]
     subprocess.run(inkscape_cmd )
 
-
+#%%
 def plot_2ap_superresolution_traces(ca_traces_dict,superresolution_traces_1ap,plot_parameters):
     
     
@@ -333,3 +625,181 @@ def plot_cell_wise_scatter_plots(ca_wave_parameters,ca_waves_dict,superresolutio
     inkscape_cmd = ['/usr/bin/inkscape', '--file',figfile.format('svg'),'--export-emf', figfile.format('emf')]
     subprocess.run(inkscape_cmd )    
         
+def plot_sample_traces(plot_parameters):
+    sweeps = plot_parameters['sweeps']
+    movie_length = plot_parameters['movie_length']
+    zoom_length = plot_parameters['zoom_length']
+    fig_longtrace = plt.figure(figsize = [10,10])
+    fig_zoom = plt.figure(figsize = [2,10])
+    fig_meanimages = plt.figure(figsize = [40,20])
+    axs_longtrace =list()
+    axs_zoomtrace = list()
+    axs_meanimages = list()
+    #%
+    for sensor in sweeps.keys():
+        sweeps_now =sweeps[sensor]
+        for sweep in sweeps_now:
+            start_time = sweep.pop('start_time',None)
+            zoom_start_time = sweep.pop('zoom_start_time',None)
+            
+            mean_image,movie_x_size,movie_y_size,movie_pixel_size,roi_xpix,roi_ypix = (imaging.ROI()*imaging.Movie()*imaging_gt.ROISweepCorrespondance()*imaging.RegisteredMovieImage()&sweep&'channel_number = 1').fetch1('registered_movie_mean_image','movie_x_size','movie_y_size','movie_pixel_size','roi_xpix','roi_ypix')
+            movie_pixel_size = float(movie_pixel_size)
+            mean_image_red = (imaging_gt.ROISweepCorrespondance()*imaging.RegisteredMovieImage()&sweep&'channel_number = 2').fetch1('registered_movie_mean_image')
+            axs_meanimages.append(fig_meanimages.add_subplot(plot_parameters['rownum'],2,len(axs_meanimages)+1))
+            im_green = axs_meanimages[-1].imshow(mean_image,cmap = 'gray', extent=[0,mean_image.shape[1]*float(movie_pixel_size),0,mean_image.shape[0]*float(movie_pixel_size)])#, aspect='auto')
+            clim = np.percentile(mean_image.flatten(),plot_parameters['cax_limits'])
+            im_green.set_clim(clim)
+            ROI = np.zeros_like(mean_image)*np.nan
+            ROI[roi_ypix,roi_xpix] = 1
+            axs_meanimages[-1].imshow(ROI,cmap = 'Greens', extent=[0,mean_image.shape[1]*float(movie_pixel_size),0,mean_image.shape[0]*float(movie_pixel_size)],alpha = plot_parameters['alpha_roi'],vmin = 0, vmax = 1)#, aspect='auto'
+            utils_plot.add_scalebar_to_fig(axs_meanimages[-1],
+                                           axis = 'x',
+                                           size = 20,
+                                           conversion = 1,
+                                           unit = r'$\mu$m',
+                                           color = 'white',
+                                           location = 'top right',
+                                           linewidth = 5) 
+            axs_meanimages.append(fig_meanimages.add_subplot(plot_parameters['rownum'],2,len(axs_meanimages)+1))
+            im_red = axs_meanimages[-1].imshow(mean_image_red,cmap = 'gray', extent=[0,mean_image.shape[1]*float(movie_pixel_size),0,mean_image.shape[0]*float(movie_pixel_size)])#, aspect='auto')
+            clim = np.percentile(mean_image_red.flatten(),plot_parameters['cax_limits'])
+            im_red.set_clim(clim)
+            utils_plot.add_scalebar_to_fig(axs_meanimages[-1],
+                                           axis = 'x',
+                                           size = 20,
+                                           conversion = 1,
+                                           unit = r'$\mu$m',
+                                           color = 'white',
+                                           location = 'top right',
+                                           linewidth = 5) 
+            #continue
+            if len(axs_longtrace)==0:
+                axs_longtrace.append(fig_longtrace.add_subplot(plot_parameters['rownum'],1,len(axs_longtrace)+1))
+            else:
+                axs_longtrace.append(fig_longtrace.add_subplot(plot_parameters['rownum'],1,len(axs_longtrace)+1,sharey = axs_longtrace[0]))
+            if len(axs_zoomtrace)==0:
+                axs_zoomtrace.append(fig_zoom.add_subplot(plot_parameters['rownum'],1,len(axs_zoomtrace)+1))
+            else:
+                axs_zoomtrace.append(fig_zoom.add_subplot(plot_parameters['rownum'],1,len(axs_zoomtrace)+1,sharey = axs_zoomtrace[0]))
+                
+            
+            table = ephys_cell_attached.Sweep()*imaging.ROI()*ephys_cell_attached.SweepMetadata()*ephys_cell_attached.SweepResponse()*imaging_gt.ROISweepCorrespondance()*imaging.ROITrace()*imaging.ROINeuropilTrace()*imaging.MovieFrameTimes()*ephys_cell_attached.Cell()*experiment.Session()&sweep&'channel_number = 1'&'neuropil_number = 1'
+            apgroup_table = table*ephysanal_cell_attached.APGroup()
+            ap_group_start_time,ap_group_end_time,ap_group_ap_num = apgroup_table.fetch('ap_group_start_time','ap_group_end_time','ap_group_ap_num')
+            
+            roi_f, neuropil_f,response_trace,sample_rate,frame_times,roi_time_offset,cell_recording_start, session_time,sweep_start_time= table.fetch1('roi_f','neuropil_f','response_trace','sample_rate','frame_times','roi_time_offset','cell_recording_start', 'session_time','sweep_start_time')
+            try:
+                squarepulse_indices = (table*ephysanal_cell_attached.SquarePulse()).fetch('square_pulse_start_idx')
+                response_trace = utils_ephys.remove_stim_artefacts_with_stim(response_trace,sample_rate,squarepulse_indices)
+            except:
+                pass
+            #response_trace = utils_ephys.remove_stim_artefacts_without_stim(response_trace,sample_rate)
+            ap_group_start_time = np.asarray(ap_group_start_time,float)-float(sweep_start_time)
+            ap_group_end_time = np.asarray(ap_group_end_time,float)-float(sweep_start_time)
+            ap_group_mean_time = np.mean([ap_group_start_time,ap_group_end_time],0)
+            frame_rate = 1/np.median(np.diff(frame_times))/1000
+            if plot_parameters['gaussian_filter_sigma']>0:
+                roi_f = utils_plot.gaussFilter(roi_f,frame_rate,plot_parameters['gaussian_filter_sigma'])
+                neuropil_f = utils_plot.gaussFilter(neuropil_f,frame_rate,plot_parameters['gaussian_filter_sigma']) 
+            roi_f_corr = roi_f-neuropil_f*plot_parameters['cawave_rneu']
+            f0 = np.percentile(roi_f_corr,10)
+            roi_dff = (roi_f_corr-f0)/f0
+            
+            ephys_time = np.arange(len(response_trace))/sample_rate
+            frame_times = frame_times - ((cell_recording_start-session_time).total_seconds()+float(sweep_start_time))
+            #%
+            response_trace_filt = utils_ephys.hpFilter(response_trace, 50, 1, sample_rate, padding = True)
+            response_trace_filt = utils_ephys.gaussFilter(response_trace_filt,sample_rate,sigma = .0001)
+            response_trace_filt_scaled = (response_trace_filt-np.min(response_trace_filt))/(np.max(response_trace_filt)-np.min(response_trace_filt))
+            response_trace_filt_scaled=response_trace_filt_scaled*1-1.5
+            #plt.plot(ephys_time,response_trace)
+            ephys_idx_needed = (ephys_time>=start_time) & (ephys_time<=start_time+movie_length)
+            dff_idx_needed = (frame_times>=start_time) & (frame_times<=start_time+movie_length)
+            
+            axs_longtrace[-1].plot(ephys_time[ephys_idx_needed],response_trace_filt_scaled[ephys_idx_needed],color = 'gray')
+            axs_longtrace[-1].plot(frame_times[dff_idx_needed],roi_dff[dff_idx_needed],color = plot_parameters['sensor_colors'][sensor])
+            axs_longtrace[-1].set_xlim([start_time,start_time+movie_length])
+            axs_longtrace[-1].axis('off')
+            
+            ephys_idx_needed = (ephys_time>=zoom_start_time) & (ephys_time<=zoom_start_time+zoom_length)
+            dff_idx_needed = (frame_times>=zoom_start_time) & (frame_times<=zoom_start_time+zoom_length)
+            
+            axs_zoomtrace[-1].plot(ephys_time[ephys_idx_needed],response_trace_filt_scaled[ephys_idx_needed],color = 'gray')
+            axs_zoomtrace[-1].plot(frame_times[dff_idx_needed],roi_dff[dff_idx_needed],color = plot_parameters['sensor_colors'][sensor])
+            axs_zoomtrace[-1].set_xlim([zoom_start_time,zoom_start_time+zoom_length])
+            axs_zoomtrace[-1].axis('off')
+            
+            rect_low = np.min(response_trace_filt_scaled[ephys_idx_needed])#-.9
+            rect_high = np.max(roi_dff[dff_idx_needed])
+            axs_longtrace[-1].plot([zoom_start_time,zoom_start_time+zoom_length,zoom_start_time+zoom_length,zoom_start_time,zoom_start_time],[rect_low,rect_low,rect_high,rect_high,rect_low],'k--')
+            for ap_group_start_time_now,ap_group_ap_num_now in zip(ap_group_mean_time,ap_group_ap_num):
+                if ap_group_start_time_now >start_time and ap_group_start_time_now<start_time+movie_length:
+                    if ap_group_ap_num_now==1:
+                        textnow = '*'
+                    else:
+                        textnow = str(ap_group_ap_num_now)
+                    axs_longtrace[-1].text(ap_group_start_time_now,-2,textnow,ha = 'center')
+                
+                if ap_group_start_time_now >zoom_start_time and ap_group_start_time_now<zoom_start_time+zoom_length:
+                    if ap_group_ap_num_now==1:
+                        textnow = '*'
+                    else:
+                        textnow = str(ap_group_ap_num_now)
+                    axs_zoomtrace[-1].text(ap_group_start_time_now,-2,textnow,ha = 'center')
+    # =============================================================================
+    #         break
+    #     break
+    # =============================================================================
+    axs_longtrace[-1].set_ylim([-2,5])
+    utils_plot.add_scalebar_to_fig(axs_longtrace[-1],
+                                   axis = 'x',
+                                   size = 5,
+                                   conversion = 1,
+                                   unit = r's',
+                                   color = 'black',
+                                   location = 'top right',
+                                   linewidth = 5) 
+    utils_plot.add_scalebar_to_fig(axs_longtrace[-1],
+                                   axis = 'y',
+                                   size = 100,
+                                   conversion = 100,
+                                   unit = r'% dF/F',
+                                   color = 'black',
+                                   location = 'top right',
+                                   linewidth = 5) 
+    
+    axs_longtrace[-1].set_ylim([-2,5])
+    #%
+    utils_plot.add_scalebar_to_fig(axs_zoomtrace[-1],
+                                   axis = 'x',
+                                   size = 500,
+                                   conversion = 1000,
+                                   unit = r'ms',
+                                   color = 'black',
+                                   location = 'bottom right',
+                                   linewidth = 5) 
+    utils_plot.add_scalebar_to_fig(axs_zoomtrace[-1],
+                                   axis = 'y',
+                                   size = 100,
+                                   conversion = 100,
+                                   unit = r'% dF/F',
+                                   color = 'black',
+                                   linewidth = 5) 
+            #%
+    figfile = os.path.join(plot_parameters['figures_dir'],'fig_sample_traces_long_'+plot_parameters['filename']+'.{}')
+    fig_longtrace.savefig(figfile.format('svg'))
+    inkscape_cmd = ['/usr/bin/inkscape', '--file',figfile.format('svg'),'--export-emf', figfile.format('emf')]
+    subprocess.run(inkscape_cmd )
+            
+    figfile = os.path.join(plot_parameters['figures_dir'],'fig_sample_traces_zoom_'+plot_parameters['filename']+'.{}')
+    fig_zoom.savefig(figfile.format('svg'))
+    inkscape_cmd = ['/usr/bin/inkscape', '--file',figfile.format('svg'),'--export-emf', figfile.format('emf')]
+    subprocess.run(inkscape_cmd ) 
+    
+    
+    figfile = os.path.join(plot_parameters['figures_dir'],'fig_sample_traces_mean_images_'+plot_parameters['filename']+'.{}')
+    fig_meanimages.savefig(figfile.format('svg'))
+    inkscape_cmd = ['/usr/bin/inkscape', '--file',figfile.format('svg'),'--export-emf', figfile.format('emf')]
+    subprocess.run(inkscape_cmd )    
+    
+    
