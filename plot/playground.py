@@ -31,6 +31,212 @@ matplotlib.rcParams['font.sans-serif'] = ['Tahoma']
 # #%%
 # plt.plot(f0,std/f0,'ko',markersize = 1,alpha = .1)
 # =============================================================================
+#%% model an image
+framenum = 100
+photon_per_dwelltime = .5
+pixel_intensity_per_photon = 500
+pix_x = 512
+pix_y = 100
+linemask = [13, 12, 13, 12, 12, 12, 12, 11, 12, 11, 11, 11, 11, 11, 11, 10, 11,
+       10, 10, 11, 10, 10, 10,  9, 10, 10,  9, 10,  9,  9, 10,  9,  9,  9,
+        9,  9,  9,  9,  8,  9,  9,  8,  9,  8,  9,  8,  9,  8,  8,  8,  9,
+        8,  8,  8,  8,  8,  8,  8,  7,  8,  8,  8,  7,  8,  8,  7,  8,  7,
+        8,  7,  8,  7,  8,  7,  7,  8,  7,  7,  7,  8,  7,  7,  7,  7,  7,
+        7,  7,  7,  7,  7,  7,  7,  7,  7,  7,  7,  6,  7,  7,  7,  7,  6,
+        7,  7,  6,  7,  7,  6,  7,  6,  7,  7,  6,  7,  6,  7,  6,  7,  6,
+        6,  7,  6,  7,  6,  6,  7,  6,  6,  7,  6,  6,  7,  6,  6,  6,  7,
+        6,  6,  6,  6,  7,  6,  6,  6,  6,  6,  6,  7,  6,  6,  6,  6,  6,
+        6,  6,  6,  6,  6,  6,  6,  6,  6,  6,  6,  6,  6,  6,  6,  6,  6,
+        6,  6,  5,  6,  6,  6,  6,  6,  6,  6,  6,  5,  6,  6,  6,  6,  6,
+        5,  6,  6,  6,  6,  5,  6,  6,  6,  5,  6,  6,  6,  6,  5,  6,  6,
+        6,  5,  6,  6,  5,  6,  6,  6,  5,  6,  6,  5,  6,  6,  6,  5,  6,
+        6,  5,  6,  6,  5,  6,  6,  5,  6,  6,  5,  6,  6,  5,  6,  6,  5,
+        6,  6,  5,  6,  6,  5,  6,  6,  5,  6,  5,  6,  6,  5,  6,  6,  5,
+        6,  6,  5,  6,  6,  5,  6,  6,  5,  6,  5,  6,  6,  5,  6,  6,  5,
+        6,  6,  5,  6,  6,  5,  6,  6,  5,  6,  6,  5,  6,  6,  5,  6,  6,
+        5,  6,  6,  5,  6,  6,  6,  5,  6,  6,  5,  6,  6,  6,  5,  6,  6,
+        5,  6,  6,  6,  5,  6,  6,  6,  6,  5,  6,  6,  6,  5,  6,  6,  6,
+        6,  5,  6,  6,  6,  6,  6,  5,  6,  6,  6,  6,  6,  6,  6,  6,  5,
+        6,  6,  6,  6,  6,  6,  6,  6,  6,  6,  6,  6,  6,  6,  6,  6,  6,
+        6,  6,  6,  6,  6,  6,  6,  7,  6,  6,  6,  6,  6,  6,  7,  6,  6,
+        6,  6,  7,  6,  6,  6,  7,  6,  6,  7,  6,  6,  7,  6,  6,  7,  6,
+        7,  6,  6,  7,  6,  7,  6,  7,  6,  7,  7,  6,  7,  6,  7,  7,  6,
+        7,  7,  6,  7,  7,  7,  7,  6,  7,  7,  7,  7,  7,  7,  7,  7,  7,
+        7,  7,  7,  7,  7,  7,  7,  8,  7,  7,  7,  8,  7,  7,  8,  7,  8,
+        7,  8,  7,  8,  7,  8,  8,  7,  8,  8,  8,  7,  8,  8,  8,  8,  8,
+        8,  8,  9,  8,  8,  8,  9,  8,  9,  8,  9,  8,  9,  9,  8,  9,  9,
+        9,  9,  9,  9,  9, 10,  9,  9, 10,  9, 10, 10,  9, 10, 10, 10, 11,
+       10, 10, 11, 10, 11, 11, 11, 11, 11, 11, 12, 11, 12, 12, 12, 12, 13,
+       12, 13]
+movie = list()
+
+for i_frame in np.arange(framenum):
+    frame = np.zeros([pix_y,pix_x])
+    for i_y in np.arange(pix_y):
+        for i_x,mask_now in enumerate(linemask):
+            frame[i_y,i_x]=np.mean(np.random.poisson(photon_per_dwelltime,mask_now)*pixel_intensity_per_photon)
+    movie.append(frame)
+    print(i_frame)
+#%% Noise analysis
+import os
+import scipy.ndimage as ndimage
+noise_upper_limit = -30000
+font = {'family' : 'normal',
+    'weight' : 'normal',
+    'size'   : 9}
+alpha = .005
+matplotlib.rc('font', **font)
+from ScanImageTiffReader import ScanImageTiffReader
+from utils.utils_pipeline import extract_scanimage_metadata
+import matplotlib.colors as colors
+#noisedir = '/home/rozmar/Data/Calcium_imaging/raw/DOM3-MMIMS/2021-02-14-fluorescent_slide'   
+#noisedir = '/home/rozmar/Data/Calcium_imaging/raw/Genie_2P_rig/20210214-fluorescent_slide'  
+#noisedir = '/home/rozmar/Data/Calcium_imaging/raw/DOM3-MMIMS/2021-02-22-noise'   
+noisedir = '/home/rozmar/Data/Calcium_imaging/raw/DOM3-MMIMS/2021-02-26-fluorescent_slide'   
+#noisedir = '/home/rozmar/Data/Calcium_imaging/raw/DOM3-MMIMS/2021-02-26-fluorescent_slide/no_binning'
+files = os.listdir(noisedir)
+files_real = list()
+for file in files:
+    if '.tif' in file:
+        files_real.append(file)
+files = files_real[::-1] 
+axs = list()
+means_all = list()
+vars_all = list()
+files = list(np.sort(files))
+files.append('sum')
+#%
+for file in files:# = 'green_PMT_off_00002_00001.tif'
+    #%
+    if file != 'sum':
+        #%
+        image = ScanImageTiffReader(os.path.join(noisedir,file))
+        metadata = extract_scanimage_metadata(os.path.join(noisedir,file))
+        linemask = np.asarray(metadata['metadata']['hScan2D']['mask'][1:-1].split(';'),int)
+        offset_subtracted = metadata['metadata']['hChannels']['channelSubtractOffset'][1:-1].split(' ')[0]=='true'
+        
+       # movie = np.asarray(image.data(),float)
+        movie = image.data()
+        
+        if not offset_subtracted:
+            movie -= np.asarray(metadata['metadata']['hChannels']['channelOffset'][1:-1].split(' '),int)[0]
+        movie[movie<0] = 0
+        #%
+        means = np.nanmean(movie,0)
+# =============================================================================
+#         if np.mean(means)>10000:
+#             continue
+# =============================================================================
+# =============================================================================
+#         if np.min(means)<0:
+#             means = means -np.min(means)
+# =============================================================================
+        variances = np.nanvar(movie,0)#*(linemask[np.newaxis,:])
+        
+# =============================================================================
+#         means = ndimage.filters.gaussian_filter(means,1)
+#         variances = ndimage.filters.gaussian_filter(variances,1)
+# =============================================================================
+        #%
+        ratio = variances/means
+        ratio_flat = ratio.flatten()
+        edges = np.percentile(ratio_flat, [0.5, 99.5])
+        edges_mean = np.percentile(means.flatten(), [0.5, 99.5])
+        edges_var = np.percentile(variances.flatten(), [0.5, 99.5])
+        means_all.append(means.flatten())
+        vars_all.append(variances.flatten()  )
+        movie_flat  =movie.flatten()
+        movie_flat = movie_flat[movie_flat  > noise_upper_limit]
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+        ax.hist(movie_flat,1000)
+        ax.set_xlabel('pixel intensity')
+        ax.set_ylabel('pixel count')
+        ax.set_title('mean intensity = {}'.format(int(np.mean(means))))
+        #ax.set_yscale('log')
+        #%
+    else:
+        means = np.concatenate(means_all)
+        variances = np.concatenate(vars_all)
+        ratio = variances/means
+        ratio_flat = ratio.flatten()
+        edges = np.percentile(ratio_flat, [0.5, 99.5])
+        edges_mean = np.percentile(means.flatten(), [0.5, 99.5])
+        edges_var = np.percentile(variances.flatten(), [0.5, 99.5])
+        means_all.append(means.flatten())
+        vars_all.append(variances.flatten()  )
+  #  
+    
+#%
+    fig = plt.figure(figsize = [7,15])
+    
+    axs.append(fig.add_subplot(3,2,1) )
+    #axs[-1].plot(means.flatten(),ratio.flatten(),'ko',ms=2,alpha = alpha)
+    axs[-1].hist2d(means.flatten(),ratio.flatten(),150,[edges_mean,edges],norm=colors.PowerNorm(gamma=0.3),cmap =  plt.get_cmap('jet'))
+    axs[-1].set_title('{} - powers: {}'.format(file,metadata['metadata']['hBeams']['powers']))      
+    axs[-1].set_xlabel('mean pixel intensity')
+    axs[-1].set_ylabel('gain of pixel')
+    #axs[-1].set_yscale('log')
+    #axs[-1].set_xscale('log')
+    
+    
+    axs.append(fig.add_subplot(3,2,5) )
+    #axs[-1].plot(means.flatten(),variances.flatten(),'ko',ms=2,alpha = alpha)
+    axs[-1].hist2d(means.flatten(),variances.flatten(),150,[edges_mean,edges_var],norm=colors.PowerNorm(gamma=0.3),cmap =  plt.get_cmap('jet'))
+    #axs[-1].set_title('{} - powers: {}'.format(file,metadata['metadata']['hBeams']['powers']))      
+    axs[-1].set_xlabel('mean pixel intensity')
+    axs[-1].set_ylabel('variance of pixel intensity')
+    #axs[-1].set_yscale('log')
+    #axs[-1].set_xscale('log')
+    
+    if file != 'sum':
+        axs.append(fig.add_subplot(3,2,2) )
+        axs[-1].set_xlabel('x pixels')
+        axs[-1].set_ylabel('y pixels')
+        axs[-1].set_title('gain of each pixel (var/mean)')
+        im = axs[-1].imshow(ratio)
+        im.set_clim(edges[0], edges[1])
+        fig.colorbar(im, ax=axs[-1])
+        
+    axs.append(fig.add_subplot(3,2,3) )
+    
+    axs[-1].hist(ratio_flat[ratio_flat<np.inf],np.arange(edges[0],edges[1],np.diff(edges)/100))
+    axs[-1].set_xlabel('gain')
+    axs[-1].set_ylabel('pixel count')
+    
+    if file != 'sum':
+        axs.append(fig.add_subplot(3,2,4) )
+        axs[-1].set_xlabel('x pixels')
+        axs[-1].set_ylabel('y pixels')
+        axs[-1].set_title('mean pixel intensity')
+        im = axs[-1].imshow(means)
+        fig.colorbar(im, ax=axs[-1])
+    
+    
+        axs.append(fig.add_subplot(3,2,6) )
+        axs[-1].set_xlabel('x pixels')
+        axs[-1].set_ylabel('y pixels')
+        axs[-1].set_title('variance of pixel intensity')
+        im = axs[-1].imshow(variances)
+        fig.colorbar(im, ax=axs[-1])
+    #plt.show()
+    #break
+        
+#%%
+fig = plt.figure()
+ax = fig.add_subplot(111)
+ax.plot(np.concatenate(means_all),np.concatenate(vars_all),'ko')
+ax.set_yscale('log')
+ax.set_xscale('log')
+ax.set_xlabel('mean pixel intensity')
+ax.set_ylabel('variance of pixel intensity')
+ax.set_title('multiple laser intensities and no laser')
+     #%%       
+     
+
+
+
+
 #%% does snr corelate with overall firing rate?
 sensors = ['GCaMP7F','XCaMPgf','456','686','688']
 fields_to_get = ['movie_mean_cawave_snr_per_ap',
@@ -104,9 +310,13 @@ for sensor in sensors:
     subjects = imaging_gt.SessionCalciumSensor()&'session_calcium_sensor = "{}"'.format(sensor)
     for subject in subjects:
         titers,volumes,dilutions = (lab.Virus()*lab.Surgery.VirusInjection()&subject).fetch('titer','volume','dilution')
-        titer = np.median(titers)/np.median(dilutions)
-        total_volume = np.sum(volumes)
-        ax_inj.semilogy(total_volume,titer,'o',color = sensor_colors[sensor],alpha = .5,markersize = 12)
+# =============================================================================
+#         titer = np.median(titers)/np.median(dilutions)
+#         total_volume = np.sum(volumes)
+# =============================================================================
+        titer = titers/dilutions
+        
+        ax_inj.semilogy(volumes,titer,'o',color = sensor_colors[sensor],alpha = .05,markersize = 12)
         
 ax_inj.set_xlabel('Total volume injected (nl)')      
 ax_inj.set_ylabel('Titer')      
@@ -359,6 +569,7 @@ plot_properties = {'sensors':['GCaMP7F','XCaMPgf','456','686','688'],
                    'max_expression_time':170}
 imaging_plot.plot_stats(plot_properties)
 #%% AP wise SNR and hw distribution and sample AP
+
 filters= {'hw_filter_sweep':'sweep_ap_hw_std_per_median<=.2',#'sweep_ap_hw_std_per_median<330.3',#'sweep_ap_snr_dv_median>=0',
           'snr_filter_sweep':'sweep_ap_snr_dv_median>10'}
 ephys_plot.ap_hw_snr_distribution_plot(filters)
@@ -489,10 +700,10 @@ ephys_plot.cell_clustering_plots(recording_mode=recording_mode,
 
 #%% #collect calcium wave properties for all sensors
 import utils.utils_plot as utils_plot
-leave_out_putative_interneurons = True
+leave_out_putative_interneurons = False
 leave_out_putative_pyramidal_cells = False
 ca_wave_parameters = {'only_manually_labelled_movies':False,
-                      'max_baseline_dff':.5,
+                      'max_baseline_dff':2,
                       'min_baseline_dff':-.5,# TODO check why baseline dff so low
                       'min_ap_snr':10,
                       'min_pre_isi':1,
@@ -539,7 +750,8 @@ ephys_properties_needed = ['ap_ahp_amplitude_median',
                            'ap_full_width_median',
                            'ap_rise_time_median',
                            'ap_peak_to_trough_time_median',
-                           'recording_mode']
+                           'recording_mode',
+                           'cell_mean_firing_rate']
 #%
 ca_waves_dict = utils_plot.collect_ca_wave_parameters(ca_wave_parameters,cawave_properties_needed,ephys_properties_needed)
 #%% compare sensors with 1AP - scatter plots
@@ -563,18 +775,33 @@ imaging_plot.plot_r_neu_distribution(sensor_colors,ca_wave_parameters)
 import plot.imaging_gt_plot as imaging_plot
 imaging_plot.plot_number_of_rois(sensor_colors)
 #%% ap parameters scatter plot, calcium sensor, median ap wave amplitude
+import plot.imaging_gt_plot as imaging_plot
 plot_parameters = {'sensors':['GCaMP7F','XCaMPgf','456','686','688'],
                    'sensor_colors':sensor_colors,
                    'ap_num_to_plot':1,
-                   'x_parameter':'ap_peak_to_trough_time_median',#'ap_peak_to_trough_time_median' # not selected by AP number
+                   'x_parameter':'ap_peak_to_trough_time_median',#'cell_mean_firing_rate',#'ap_peak_to_trough_time_median' # not selected by AP number
                    'y_parameter':'ap_ahp_amplitude_median',# not selected by AP number
-                   'z_parameter':'cawave_snr_median_per_ap',#'roi_f0_percentile_median_per_ap',#'cawave_snr_median_per_ap',#
+                   'z_parameter':'cell_mean_firing_rate',#'cawave_peak_amplitude_dff',#'cawave_snr_median_per_ap',#'roi_f0_percentile_median_per_ap',#'cawave_snr_median_per_ap',#
+                   'z_parameter_unit': 'Hz',
                    'invert y axis':True,
                    'alpha' : .5,
                    'markersize_edges' : [2,20],
                    'z_parameter_percentiles':[5,95],
-                   'normalize z by sensor':True}#'cawave_peak_amplitude_dff_median_per_ap'
+                   'normalize z by sensor':False}#'cawave_peak_amplitude_dff_median_per_ap'
 imaging_plot.plot_ap_scatter_with_ophys_prop(ca_waves_dict,plot_parameters)
+#%%
+
+# =============================================================================
+# firing_rate,cell_type,sensors = (imaging_gt.SessionCalciumSensor()*ephysanal_cell_attached.EphysCellType()*ephysanal_cell_attached.CellMeanFiringRate()).fetch('cell_mean_firing_rate','ephys_cell_type','session_calcium_sensor')
+# fig = plt.figure()
+# ax = fig.add_subplot(111)
+# for i,sensor in enumerate(np.unique(sensors)):
+#     idx = sensors == sensor
+#     ax.plot(np.ones(sum(idx))*i,firing_rate[idx],'ko',alpha = .1)
+# 
+# =============================================================================
+
+
 #%% download sensor kinetics
 wave_parameters = {'ap_num_to_plot':1,#ap_num_to_plot
                    'min_ap_per_apnum':min_ap_per_apnum}
@@ -890,140 +1117,21 @@ ax_16_pix.hist(pixnum_16pix,50)
 #%% select high SNR movies for all sensors
 #%% anatomy
 #% filtering images
-import os
-from skimage.io import imread
-import scipy.ndimage as ndimage
-from sklearn.metrics import pairwise_distances
-anatomy_base_dir = '/home/rozmar/Data/Anatomy/cropped_rotated'
-save_base_dir = '/home/rozmar/Data/Anatomy/filtered'
-sigma_gauss = 100 # pixels
-minimum_horizontal_separation = 500
-orverwrite = True
-dirs_ = os.listdir(anatomy_base_dir)
-subject_ids = list()
-dirs =  list()
-for dir_now in dirs_: 
-    if dir_now[3:9].isnumeric():
-        dirs.append(dir_now)
-        subject_ids.append(dir_now[3:9])
-peak_data = dict()
-fig = plt.figure(figsize = [20,20])
-for subject_id,subject_dir in zip(subject_ids,dirs):
-    if '20x' not in subject_dir:
-        continue # only 20x images
-    if os.path.exists(os.path.join(save_base_dir,basename+str(z)+'.jpg')) and not orverwrite:
-        continue
-    peak_data[subject_dir] = dict()
-    peak_data[subject_dir]['peak_values_rfp_1'] = list()
-    peak_data[subject_dir]['peak_values_fitc_1'] = list()
-    peak_data[subject_dir]['peak_values_rfp_2'] = list()
-    peak_data[subject_dir]['peak_values_fitc_2'] = list()
-    peak_data[subject_dir]['peak_idx_x_1'] = list()
-    peak_data[subject_dir]['peak_idx_y_1'] = list()
-    peak_data[subject_dir]['peak_idx_x_2'] = list()
-    peak_data[subject_dir]['peak_idx_y_2'] = list()
-    peak_data[subject_dir]['z'] = list()
-    peak_data[subject_dir]['filename'] = list()
-    subject_dir_full = os.path.join(anatomy_base_dir,subject_dir)
-    channels = os.listdir(subject_dir_full)
-    rfp_dir = os.path.join(subject_dir_full,'RFP')
-    fitc_dir = os.path.join(subject_dir_full,'FITC')
-    rfp_files = np.sort(os.listdir(rfp_dir))
-    for rfp_file in rfp_files:
-        print(rfp_file)
-        basename = rfp_file[:rfp_file.find('RFP')]
-        z = int(rfp_file[rfp_file.find('_Z_')+3:-5])
-        im_rfp = imread(os.path.join(rfp_dir,rfp_file))
-        im_rfp_filt = ndimage.filters.gaussian_filter(im_rfp,sigma_gauss)
-        fitc_file = rfp_file[:rfp_file.find('RFP')]+'FITC'+rfp_file[rfp_file.find('RFP')+3:]
-        im_fitc = imread(os.path.join(fitc_dir,fitc_file))
-        im_fitc_filt = ndimage.filters.gaussian_filter(im_fitc,sigma_gauss)
-        
-        #%
-        max_val_rfp = np.max(im_rfp_filt)
-        num_objects_separated = 0
-        denominator = 1.1
-        while num_objects_separated<2 and denominator<5:
-            threshold = max_val_rfp/denominator        
-            thresholded_image = im_rfp_filt>threshold    
-            labeled, num_objects = ndimage.label(thresholded_image)
-            denominator += .1
-            #%
-            max_vals = list()
-            max_idxs = list()
-            max_idxs_x = list()
-            max_idxs_y = list()
-            for peak_num in range(1,num_objects+1):
-                max_val = np.max(im_rfp_filt[labeled==peak_num])
-                max_vals.append(max_val)
-                slice_x,slice_y = ndimage.find_objects(labeled==peak_num)[0]
-                maxidxes = np.where(im_rfp_filt[slice_x,slice_y]==np.max(im_rfp_filt[slice_x,slice_y]))
-                max_idx = np.asarray(np.mean(maxidxes,1),int)+np.asarray([slice_x.start,slice_y.start])
-                max_idxs.append(max_idx)
-                max_idxs_x.append(max_idx[0])
-                max_idxs_y.append(max_idx[1])
-            num_objects_separated = num_objects
-            if np.max(max_idxs_y)-np.min(max_idxs_y)<minimum_horizontal_separation:
-                num_objects_separated = 1
 
-                #%
-        max_vals = list()
-        max_idxs = list()
-        max_idxs_x = list()
-        max_idxs_y = list()
-        for peak_num in range(1,num_objects+1):
-            max_val = np.max(im_rfp_filt[labeled==peak_num])
-            
-            slice_x,slice_y = ndimage.find_objects(labeled==peak_num)[0]
-            maxidxes = np.where(im_rfp_filt[slice_x,slice_y]==np.max(im_rfp_filt[slice_x,slice_y]))
-            max_idx = np.asarray(np.mean(maxidxes,1),int)+np.asarray([slice_x.start,slice_y.start])
-            
-            if len(max_idxs_y)==0 or np.abs(max_idxs_y[0]-max_idx[1])>minimum_horizontal_separation:
-                max_vals.append(max_val)
-                max_idxs.append(max_idx)
-                max_idxs_x.append(max_idx[0])
-                max_idxs_y.append(max_idx[1])
-        order = np.argsort(max_vals)[::-1]
-        max_idxs = np.asarray(max_idxs)[order]
-        max_vals = np.asarray(max_vals)[order]
-        for peak_num, (max_idx, max_val) in enumerate(zip(max_idxs,max_vals)):
-            peak_num+=1
-            if peak_num>2:
-                break
-            peak_data[subject_dir]['peak_values_rfp_{}'.format(peak_num)].append(im_rfp_filt[max_idx[0],max_idx[1]])
-            peak_data[subject_dir]['peak_values_fitc_{}'.format(peak_num)].append(im_fitc_filt[max_idx[0],max_idx[1]])
-            peak_data[subject_dir]['peak_idx_x_{}'.format(peak_num)].append(max_idx[0])
-            peak_data[subject_dir]['peak_idx_y_{}'.format(peak_num)].append(max_idx[1])
-            peak_data[subject_dir]['z'].append(z)
-            peak_data[subject_dir]['filename'].append(rfp_file)
-            print('peak_value: {}'.format(max_val))
-            #break
-        if peak_num==0:
-            peak_data[subject_dir]['peak_values_rfp_{}'.format(2)].append(np.nan)
-            peak_data[subject_dir]['peak_values_fitc_{}'.format(2)].append(np.nan)
-            peak_data[subject_dir]['peak_idx_x_{}'.format(2)].append(np.nan)
-            peak_data[subject_dir]['peak_idx_y_{}'.format(2)].append(np.nan)
-        #%
-        fig.clear()
-        ax_rfp=fig.add_subplot(2,2,1)
-        ax_fitc=fig.add_subplot(2,2,2)
-        ax_rfp_filt=fig.add_subplot(2,2,3)
-        ax_fitc_filt=fig.add_subplot(2,2,4)
-        ax_rfp.set_title('anti-GFP')
-        ax_fitc.set_title('native fluorescence')
+       
         
-        
-        ax_rfp.imshow(im_rfp)
-        ax_rfp_filt.imshow(im_rfp_filt)
-        ax_fitc.imshow(im_fitc)
-        ax_fitc_filt.imshow(im_fitc_filt)   
-        for max_idx in max_idxs:
-            ax_rfp_filt.plot(max_idx[1],max_idx[0],'ro')
-            ax_fitc_filt.plot(max_idx[1],max_idx[0],'ro')
-        fig.savefig(os.path.join(save_base_dir,basename+str(z)+'.jpg'))
-
 # =============================================================================
 #         break
 #     break
 # =============================================================================
+#%% analyze dictionaries
+    
+# load json file
+    
+    
+   
+#%%
+    
+    
 
+#%%   
