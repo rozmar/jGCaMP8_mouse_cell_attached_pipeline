@@ -38,6 +38,232 @@ matplotlib.rcParams['font.sans-serif'] = ['Tahoma']
 # inkscape_cmd = ['/usr/bin/inkscape', '--file',figfile.format('svg'),'--export-emf', figfile.format('emf')]
 # subprocess.run(inkscape_cmd )
 # =============================================================================
+#%%
+#%%#######################################################################ALL RECORDING STATS - START################################################################################
+#################################################################################%%############################################################################################
+leave_out_putative_interneurons = False
+leave_out_putative_pyramidal_cells = False
+ca_wave_parameters = {'only_manually_labelled_movies':False,
+                      'max_baseline_dff':2,
+                      'min_baseline_dff':-.5,# TODO check why baseline dff so low
+                      'min_ap_snr':10,
+                      'min_pre_isi':.5,
+                      'min_post_isi':.5,
+                      'max_sweep_ap_hw_std_per_median':.2,
+                      'min_sweep_ap_snr_dv_median':10,
+                      'gaussian_filter_sigma':5,#0,5,10,20,50
+                      'neuropil_subtraction':'0.8',#'none','0.7','calculated','0.8'
+                      'neuropil_number':1,#0,1 # 0 is 2 pixel , 1 is 4 pixels left out around the cell
+                      'sensors': ['XCaMPgf','GCaMP7F','456','686','688'], # this determines the order of the sensors,#'XCaMPgf'
+                      'ephys_recording_mode':'current clamp',
+                      'minimum_f0_value':20, # when the neuropil is bright, the F0 can go negative after neuropil subtraction
+                      'min_channel_offset':100 # PMT error
+                      }
+if leave_out_putative_interneurons:
+    ca_wave_parameters['max_ap_peak_to_trough_time_median']=0.65
+    ca_wave_parameters['min_ap_ahp_amplitude_median']=.1
+else:
+    ca_wave_parameters['max_ap_peak_to_trough_time_median']=-100
+    ca_wave_parameters['min_ap_ahp_amplitude_median']=100
+if leave_out_putative_pyramidal_cells:
+    ca_wave_parameters['min_ap_peak_to_trough_time_median']=0.65
+    ca_wave_parameters['max_ap_ahp_amplitude_median']=.1
+else:
+    ca_wave_parameters['min_ap_peak_to_trough_time_median']=100
+    ca_wave_parameters['max_ap_ahp_amplitude_median']=-100    
+cawave_properties_needed = ['cawave_baseline_dff_global',
+                            'ap_group_ap_num',
+                            'cawave_snr', 
+                            'cawave_peak_amplitude_dff',
+                            'cawave_peak_amplitude_f',
+                            'cawave_baseline_f',
+                            'cawave_baseline_f_std',
+                            'cawave_rneu',
+                            'cawave_rise_time',
+                            'cawave_half_decay_time',
+                            'movie_hmotors_sample_z',
+                            'movie_power',
+                            'session_sensor_expression_time',
+                            'roi_pixel_num',
+                            'roi_dwell_time_multiplier',
+                            'roi_f0_percentile',
+                            'roi_f0_percentile_value']
+ephys_properties_needed = ['ap_ahp_amplitude_median',
+                           'ap_halfwidth_median',
+                           'ap_full_width_median',
+                           'ap_rise_time_median',
+                           'ap_peak_to_trough_time_median',
+                           'recording_mode']
+#%
+ca_waves_dict_all = utils_plot.collect_ca_wave_parameters(ca_wave_parameters,
+                                                          cawave_properties_needed,
+                                                          ephys_properties_needed)
+
+
+
+#%% neuropil distribution
+from plot import manuscript_figures_core
+plot_properties = {'fig_name':'neuropil_distribution',
+                   'figures_dir':figures_dir}
+manuscript_figures_core.plot_r_neu_distribution(sensor_colors,ca_wave_parameters,plot_properties)
+#%% number of ROIs in each movie
+import plot.imaging_gt_plot as imaging_plot
+imaging_plot.plot_number_of_rois(sensor_colors)
+#%%
+#%% stats for all experiments
+sensor_names = {'GCaMP7F': 'jGCaMP7f',
+                'XCaMPgf': 'XCaMPgf',
+                '456': 'jGCaMP8f',
+                '686': 'jGCaMP8m',
+                '688': 'jGCaMP8s'}
+plot_properties = {'sensors':['GCaMP7F','XCaMPgf','456','686','688'],
+                   'sensor_colors':sensor_colors,
+                   'max_expression_time':170,
+                   'fig_name':'in_vivo_summary_stats',
+                   'figures_dir':figures_dir,
+                   'sensor_names':sensor_names}
+inclusion_criteria = {'max_sweep_ap_hw_std_per_median':.2,
+                      'min_sweep_ap_snr_dv_median':10,
+                      'minimum_f0_value':20, # when the neuropil is bright, the F0 can go negative after neuropil subtraction
+                      'min_channel_offset':100 # PMT error
+                      }
+#%
+manuscript_figures_core.plot_stats(plot_properties,inclusion_criteria)
+#%%ap parameters scatter plot, calcium sensor, median ap wave amplitude
+from plot import manuscript_figures_core
+plot_parameters = {'sensors':['GCaMP7F','XCaMPgf','456','686','688'],
+                   'sensor_colors':sensor_colors,
+                   'ap_num_to_plot':1,
+                   'x_parameter':'ap_peak_to_trough_time_median',#'cell_mean_firing_rate',#'ap_peak_to_trough_time_median' # not selected by AP number
+                   'y_parameter':'ap_ahp_amplitude_median',# not selected by AP number
+                   'z_parameter':'cell_mean_firing_rate',#'cawave_peak_amplitude_dff',#'cawave_snr_median_per_ap',#'roi_f0_percentile_median_per_ap',#'cawave_snr_median_per_ap',#
+                   'z_parameter_unit': 'Hz',
+                   'invert y axis':True,
+                   'alpha' : .5,
+                   'markersize_edges' : [2,20],
+                   'z_parameter_percentiles':[5,95],
+                   'normalize z by sensor':False,
+                   'xlim':[0.2,2.5],
+                   'fig_name':'AP_parameters_interneuron_selection',
+                   'figures_dir':figures_dir,
+                   'xlabel':'Peak to trough time (ms)',
+                   'ylabel':'Peak to trough ratio'}#'cawave_peak_amplitude_dff_median_per_ap'
+manuscript_figures_core.plot_ap_scatter_with_third_parameter(ca_waves_dict,plot_parameters)
+
+#%%
+#%% figure explaining superresolution analysis
+
+#  TODO: Select only high SNR events!!
+
+#key_first_ap = { 'session': 1, 'sweep_number': 2, 'ap_group_number': 112, 'gaussian_filter_sigma': 0, 'neuropil_subtraction': 'calculated', 'neuropil_number': 1}        
+# =============================================================================
+# first_subject_id = 472181
+# first_cell_number= 7
+# first_ap_group_number = 112
+# first_sweep_number = 2
+# =============================================================================
+key_first_ap = {}
+key_all_ap = {'session': 1, 'gaussian_filter_sigma': 0, 'neuropil_subtraction': '0.8', 'neuropil_number': 1,'ap_group_ap_num':1}        
+snr_cond = 'ap_group_min_snr_dv>{}'.format(20)
+preisi_cond = 'ap_group_pre_isi>{}'.format(ca_wave_parameters['min_pre_isi'])
+postisi_cond = 'ap_group_post_isi>{}'.format(ca_wave_parameters['min_post_isi'])
+basline_dff_cond = 'cawave_baseline_dff_global<{}'.format(ca_wave_parameters['max_baseline_dff'])
+basline_dff_cond_2 = 'cawave_baseline_dff_global>{}'.format(ca_wave_parameters['min_baseline_dff'])
+cawave_snr_cond = 'cawave_snr > {}'.format(5)
+sensor_cond = 'session_calcium_sensor = "{}"'.format('688')
+big_table = ephysanal_cell_attached.APGroup()*imaging_gt.SessionCalciumSensor()*imaging_gt.CalciumWave.CalciumWaveProperties()*ephys_cell_attached.SweepMetadata()*ephysanal_cell_attached.APGroupTrace()*imaging_gt.CalciumWave.CalciumWaveNeuropil()*imaging_gt.CalciumWave()#imaging_gt.SessionCalciumSensor()*imaging_gt.CalciumWave.CalciumWaveProperties()*ephysanal_cell_attached.APGroup()
+subject_ids,cell_numbers,ap_group_numbers,sweep_numbers,cawave_snr = (big_table&key_all_ap& snr_cond & preisi_cond & postisi_cond & basline_dff_cond & basline_dff_cond_2 & cawave_snr_cond&sensor_cond).fetch('subject_id','cell_number','ap_group_number','sweep_number','cawave_snr')
+# =============================================================================
+# ap_group_numbers = np.concatenate([[first_ap_group_number],ap_group_numbers])
+# sweep_numbers = np.concatenate([[first_sweep_number],sweep_numbers])
+# subject_ids = np.concatenate([[first_subject_id],subject_ids])
+# cell_numbers = np.concatenate([[first_cell_number],cell_numbers])
+# =============================================================================
+#%
+from scipy.signal import decimate
+
+alpha = .1
+number_of_transients = 250
+fig = plt.figure(figsize = [10,10])
+ax_dff=fig.add_subplot(4,1,3)
+ax_event_times = fig.add_subplot(4,1,2,sharex = ax_dff)
+plt.axis('off')
+ax_ephys = fig.add_subplot(4,1,1,sharex = ax_dff)
+ax_superresolution = fig.add_subplot(4,1,4,sharex = ax_dff)
+cawave_dff_list = list()
+cawave_time_list = list()
+x_limits = [-25,50]
+for wave_idx,(sweep_number,ap_group_number,subject_id,cell_number) in enumerate(zip(sweep_numbers,ap_group_numbers,subject_ids,cell_numbers)):
+    
+    key_first_ap['sweep_number'] = sweep_number
+    key_first_ap['ap_group_number'] = ap_group_number
+    key_first_ap['subject_id'] = subject_id
+    key_first_ap['cell_number'] = cell_number
+    key_first_ap['neuropil_subtraction'] = '0.8'
+    key_first_ap['gaussian_filter_sigma'] = 0
+    key_first_ap['neuropil_number'] = 1
+    #try:
+    cawave_f,cawave_fneu,cawave_time,ap_group_trace,sample_rate,ap_group_trace_peak_idx,cawave_rneu,cawave_baseline_f = (big_table&key_first_ap).fetch1('cawave_f','cawave_fneu','cawave_time','ap_group_trace','sample_rate','ap_group_trace_peak_idx','cawave_rneu','cawave_baseline_f')
+    #cawave_rneu,cawave_baseline_f = (imaging_gt.CalciumWave.CalciumWaveProperties()&key).fetch1('cawave_rneu','cawave_baseline_f')
+    cawave_f_corr = cawave_f-cawave_fneu*cawave_rneu
+    cawave_dff = (cawave_f_corr-cawave_baseline_f)/cawave_baseline_f 
+    ap_group_trace_time = np.arange(-ap_group_trace_peak_idx,len(ap_group_trace)-ap_group_trace_peak_idx)/sample_rate*1000
+    cawave_idx = (cawave_time>=x_limits[0]-10) & (cawave_time<=x_limits[1]+10)
+    ephys_idx = (ap_group_trace_time>=x_limits[0]-10) & (ap_group_trace_time<=x_limits[1]+10)
+    ax_dff.plot(cawave_time[cawave_idx],cawave_dff[cawave_idx],'go-',alpha = alpha)
+    ax_ephys.plot(decimate(ap_group_trace_time[ephys_idx],1),decimate(ap_group_trace[ephys_idx],1),'k-',alpha = alpha)
+    ax_event_times.plot(cawave_time[cawave_idx],np.zeros(len(cawave_time[cawave_idx]))+wave_idx,'go',alpha = alpha)
+    cawave_dff_list.append(cawave_dff)
+    cawave_time_list.append(cawave_time)
+    if wave_idx == number_of_transients-1:
+        break
+# =============================================================================
+#     except:
+#         pass
+# =============================================================================
+ax_event_times.set_ylim([-10,510])
+
+#ax_ephys.set_xlim([-25,50])
+ax_ephys.set_ylim([-.5,1.5])
+
+ax_ephys.set_ylabel('Ephys normalized')
+ax_dff.set_ylabel('dF/F')
+ax_dff.set_ylim([-.25,1])
+#%
+#if plot_superresolution_instead_of_ephys:
+x_conc = np.concatenate(cawave_time_list)
+y_conc = np.concatenate(cawave_dff_list)
+needed_idx = (x_conc>x_limits[0]-10)& (x_conc<x_limits[1]+10)
+x_conc = x_conc[needed_idx]
+y_conc = y_conc[needed_idx]
+trace_dict = utils_plot.generate_superresolution_trace(x_conc,y_conc,bin_step=1,bin_size=5,function = 'all',dogaussian = True)
+
+ax_superresolution.plot(trace_dict['bin_centers'],trace_dict['trace_gauss'],'go-')#trace_mean
+ax_superresolution.set_ylabel('dF/F')
+#ax_ephys.set_ylim([-.5,2])
+ax_superresolution.set_xlim(x_limits)
+ax_superresolution.set_xlabel('Time from AP peak (ms)')
+filename = 'superresolution_{}_events'.format(number_of_transients)
+figfile = os.path.join(figures_dir,filename+'.{}')
+fig.savefig(figfile.format('svg'))
+inkscape_cmd = ['/usr/bin/inkscape', '--file',figfile.format('svg'),'--export-emf', figfile.format('emf')]
+subprocess.run(inkscape_cmd )
+
+
+#%%
+import scipy.stats as stats
+from scipy import signal
+bin_size = 5
+bin_step=1
+idxes_gauss = np.arange(-bin_size,bin_size,bin_step)
+gauss_f = stats.norm(0,bin_size/4)
+gauss_w = gauss_f.pdf(idxes_gauss)
+#gauss_w = gauss_w/sum(gauss_w)
+#%%
+out = signal.deconvolve(trace_dict['trace_gauss'], gauss_w)
+
+#%%#######################################################################ALL RECORDING STATS - END################################################################################
+#################################################################################%%############################################################################################
 
 #%%#######################################################################Grand averages-scatter plots - START################################################################################
 #################################################################################%%############################################################################################
@@ -875,7 +1101,8 @@ superres_parameters={'sensor_colors':sensor_colors,
                      'end_time':1000,#ms
                      'traces_to_use':['f_corr','dff','f_corr_normalized'],
                      'cell_wise_analysis':True,
-                     'dogaussian':False
+                     'dogaussian':False,
+                     'double_bin_size_for_old_sensors':False
                      }
 superresolution_traces_1ap_int_low_resolution = utils_plot.calculate_superresolution_traces_for_all_sensors(ca_traces_dict_1ap_int,
                                                                                                              ca_traces_dict_by_cell_1ap_int,
@@ -889,8 +1116,8 @@ superresolution_traces = superresolution_traces_1ap_int_low_resolution
 fig_grand_average_traces_pyr = plt.figure()
 ax_grand_average = fig_grand_average_traces_pyr.add_subplot(1,1,1)
 plot_parameters={'sensor_colors':sensor_colors,
-                 'start_time':-100, # ms
-                 'end_time':500,#ms
+                 'start_time':-50, # ms
+                 'end_time':300,#ms
                  'trace_to_use':'dff',#'f_corr','dff','f_corr_normalized'
                  'superresolution_function':'mean',#'mean',#'median'#'gauss'#
                  'normalize_to_max':False,
@@ -1068,6 +1295,32 @@ ax_cellnum.set_ylabel('Number of cells in dataset')
 ax_amplitude_norm.set_ylabel('Amplitude normalized to single spike event')
 #ax_amplitude.set_xlabel('Number of spikes') 
 ax_amplitude.set_ylabel('Amplitude (dF/F)')
+#%%
+import utils.utils_ephys as utils_ephys
+#% Putative pyramidal cells
+
+# putative interneurons
+movie_length = 80 #s
+zoom_length = 10#2
+sweeps = {'456':[{'subject_id':478407,'session':1,'cell_number':7,'sweep_number':4,'start_time':35,'zoom_start_time':44}],
+          '686':[{'subject_id':472180,'session':1,'cell_number':1,'sweep_number':1,'start_time':50,'zoom_start_time':56}],#132
+          '688':[{'subject_id':479119,'session':1,'cell_number':9,'sweep_number':2,'start_time':25,'zoom_start_time':69}]
+          }
+
+plot_parameters = {'gaussian_filter_sigma':5,
+                   'cawave_rneu' : .8,
+                   'rownum' : 4,
+                   'cax_limits' : [0,99],
+                   'alpha_roi':.3,
+                   'filename':'int',
+                   'figures_dir':figures_dir,
+                   'movie_length':movie_length,
+                   'zoom_length':zoom_length,
+                   'sweeps':sweeps,
+                   'sensor_colors':sensor_colors
+                   }
+
+manuscript_figures_core.plot_sample_traces(plot_parameters)
 
 #%%#######################################################################INTERNEURONS - END################################################################################
 #################################################################################%%############################################################################################
@@ -1180,182 +1433,124 @@ sweeps = {'456':[{'subject_id':471993,'session':1,'cell_number':2,'sweep_number'
 #           }
 # =============================================================================
 plot_parameters = {'gaussian_filter_sigma':5,
+                   'cawave_rneu' : .8,
+                   'rownum' : 4,
+                   'cax_limits' : [0,99],
+                   'alpha_roi':.3,
+                   'filename':'pyr',
+                   'figures_dir':figures_dir,
+                   'movie_length':movie_length,
+                   'zoom_length':zoom_length,
+                   'sweeps':sweeps,
+                   'sensor_colors':sensor_colors
                    }
-cawave_rneu = .8
-rownum = 4
-cax_limits = [0,99]
-alpha_roi = .3
-fig_longtrace = plt.figure(figsize = [10,10])
-fig_zoom = plt.figure(figsize = [2,10])
-fig_meanimages = plt.figure(figsize = [40,20])
-axs_longtrace =list()
-axs_zoomtrace = list()
-axs_meanimages = list()
-#%
-for sensor in sweeps.keys():
-    sweeps_now =sweeps[sensor]
-    for sweep in sweeps_now:
-        start_time = sweep.pop('start_time',None)
-        zoom_start_time = sweep.pop('zoom_start_time',None)
-        
-        mean_image,movie_x_size,movie_y_size,movie_pixel_size,roi_xpix,roi_ypix = (imaging.ROI()*imaging.Movie()*imaging_gt.ROISweepCorrespondance()*imaging.RegisteredMovieImage()&sweep&'channel_number = 1').fetch1('registered_movie_mean_image','movie_x_size','movie_y_size','movie_pixel_size','roi_xpix','roi_ypix')
-        movie_pixel_size = float(movie_pixel_size)
-        mean_image_red = (imaging_gt.ROISweepCorrespondance()*imaging.RegisteredMovieImage()&sweep&'channel_number = 2').fetch1('registered_movie_mean_image')
-        axs_meanimages.append(fig_meanimages.add_subplot(rownum,2,len(axs_meanimages)+1))
-        im_green = axs_meanimages[-1].imshow(mean_image,cmap = 'gray', extent=[0,mean_image.shape[1]*float(movie_pixel_size),0,mean_image.shape[0]*float(movie_pixel_size)])#, aspect='auto')
-        clim = np.percentile(mean_image.flatten(),cax_limits)
-        im_green.set_clim(clim)
-        ROI = np.zeros_like(mean_image)*np.nan
-        ROI[roi_ypix,roi_xpix] = 1
-        axs_meanimages[-1].imshow(ROI,cmap = 'Greens', extent=[0,mean_image.shape[1]*float(movie_pixel_size),0,mean_image.shape[0]*float(movie_pixel_size)],alpha = alpha_roi,vmin = 0, vmax = 1)#, aspect='auto'
-        utils_plot.add_scalebar_to_fig(axs_meanimages[-1],
-                                       axis = 'x',
-                                       size = 20,
-                                       conversion = 1,
-                                       unit = r'$\mu$m',
-                                       color = 'white',
-                                       location = 'top right',
-                                       linewidth = 5) 
-        axs_meanimages.append(fig_meanimages.add_subplot(rownum,2,len(axs_meanimages)+1))
-        im_red = axs_meanimages[-1].imshow(mean_image_red,cmap = 'gray', extent=[0,mean_image.shape[1]*float(movie_pixel_size),0,mean_image.shape[0]*float(movie_pixel_size)])#, aspect='auto')
-        clim = np.percentile(mean_image_red.flatten(),cax_limits)
-        im_red.set_clim(clim)
-        utils_plot.add_scalebar_to_fig(axs_meanimages[-1],
-                                       axis = 'x',
-                                       size = 20,
-                                       conversion = 1,
-                                       unit = r'$\mu$m',
-                                       color = 'white',
-                                       location = 'top right',
-                                       linewidth = 5) 
-        #continue
-        if len(axs_longtrace)==0:
-            axs_longtrace.append(fig_longtrace.add_subplot(rownum,1,len(axs_longtrace)+1))
-        else:
-            axs_longtrace.append(fig_longtrace.add_subplot(rownum,1,len(axs_longtrace)+1,sharey = axs_longtrace[0]))
-        if len(axs_zoomtrace)==0:
-            axs_zoomtrace.append(fig_zoom.add_subplot(rownum,1,len(axs_zoomtrace)+1))
-        else:
-            axs_zoomtrace.append(fig_zoom.add_subplot(rownum,1,len(axs_zoomtrace)+1,sharey = axs_zoomtrace[0]))
-            
-        
-        table = ephys_cell_attached.Sweep()*imaging.ROI()*ephys_cell_attached.SweepMetadata()*ephys_cell_attached.SweepResponse()*imaging_gt.ROISweepCorrespondance()*imaging.ROITrace()*imaging.ROINeuropilTrace()*imaging.MovieFrameTimes()*ephys_cell_attached.Cell()*experiment.Session()&sweep&'channel_number = 1'&'neuropil_number = 1'
-        apgroup_table = table*ephysanal_cell_attached.APGroup()
-        ap_group_start_time,ap_group_end_time,ap_group_ap_num = apgroup_table.fetch('ap_group_start_time','ap_group_end_time','ap_group_ap_num')
-        
-        roi_f, neuropil_f,response_trace,sample_rate,frame_times,roi_time_offset,cell_recording_start, session_time,sweep_start_time= table.fetch1('roi_f','neuropil_f','response_trace','sample_rate','frame_times','roi_time_offset','cell_recording_start', 'session_time','sweep_start_time')
-        try:
-            squarepulse_indices = (table*ephysanal_cell_attached.SquarePulse()).fetch('square_pulse_start_idx')
-            response_trace = utils_ephys.remove_stim_artefacts_with_stim(response_trace,sample_rate,squarepulse_indices)
-        except:
-            pass
-        #response_trace = utils_ephys.remove_stim_artefacts_without_stim(response_trace,sample_rate)
-        ap_group_start_time = np.asarray(ap_group_start_time,float)-float(sweep_start_time)
-        ap_group_end_time = np.asarray(ap_group_end_time,float)-float(sweep_start_time)
-        ap_group_mean_time = np.mean([ap_group_start_time,ap_group_end_time],0)
-        frame_rate = 1/np.median(np.diff(frame_times))/1000
-        if plot_parameters['gaussian_filter_sigma']>0:
-            roi_f = utils_plot.gaussFilter(roi_f,frame_rate,plot_parameters['gaussian_filter_sigma'])
-            neuropil_f = utils_plot.gaussFilter(neuropil_f,frame_rate,plot_parameters['gaussian_filter_sigma']) 
-        roi_f_corr = roi_f-neuropil_f*cawave_rneu
-        f0 = np.percentile(roi_f_corr,10)
-        roi_dff = (roi_f_corr-f0)/f0
-        
-        ephys_time = np.arange(len(response_trace))/sample_rate
-        frame_times = frame_times - ((cell_recording_start-session_time).total_seconds()+float(sweep_start_time))
-        #%
-        response_trace_filt = utils_ephys.hpFilter(response_trace, 50, 1, sample_rate, padding = True)
-        response_trace_filt = utils_ephys.gaussFilter(response_trace_filt,sample_rate,sigma = .0001)
-        response_trace_filt_scaled = (response_trace_filt-np.min(response_trace_filt))/(np.max(response_trace_filt)-np.min(response_trace_filt))
-        response_trace_filt_scaled=response_trace_filt_scaled*1-1.5
-        #plt.plot(ephys_time,response_trace)
-        ephys_idx_needed = (ephys_time>=start_time) & (ephys_time<=start_time+movie_length)
-        dff_idx_needed = (frame_times>=start_time) & (frame_times<=start_time+movie_length)
-        
-        axs_longtrace[-1].plot(ephys_time[ephys_idx_needed],response_trace_filt_scaled[ephys_idx_needed],color = 'gray')
-        axs_longtrace[-1].plot(frame_times[dff_idx_needed],roi_dff[dff_idx_needed],color = sensor_colors[sensor])
-        axs_longtrace[-1].set_xlim([start_time,start_time+movie_length])
-        axs_longtrace[-1].axis('off')
-        
-        ephys_idx_needed = (ephys_time>=zoom_start_time) & (ephys_time<=zoom_start_time+zoom_length)
-        dff_idx_needed = (frame_times>=zoom_start_time) & (frame_times<=zoom_start_time+zoom_length)
-        
-        axs_zoomtrace[-1].plot(ephys_time[ephys_idx_needed],response_trace_filt_scaled[ephys_idx_needed],color = 'gray')
-        axs_zoomtrace[-1].plot(frame_times[dff_idx_needed],roi_dff[dff_idx_needed],color = sensor_colors[sensor])
-        axs_zoomtrace[-1].set_xlim([zoom_start_time,zoom_start_time+zoom_length])
-        axs_zoomtrace[-1].axis('off')
-        
-        rect_low = np.min(response_trace_filt_scaled[ephys_idx_needed])#-.9
-        rect_high = np.max(roi_dff[dff_idx_needed])
-        axs_longtrace[-1].plot([zoom_start_time,zoom_start_time+zoom_length,zoom_start_time+zoom_length,zoom_start_time,zoom_start_time],[rect_low,rect_low,rect_high,rect_high,rect_low],'k--')
-        for ap_group_start_time_now,ap_group_ap_num_now in zip(ap_group_mean_time,ap_group_ap_num):
-            if ap_group_start_time_now >start_time and ap_group_start_time_now<start_time+movie_length:
-                if ap_group_ap_num_now==1:
-                    textnow = '*'
-                else:
-                    textnow = str(ap_group_ap_num_now)
-                axs_longtrace[-1].text(ap_group_start_time_now,-2,textnow,ha = 'center')
-            
-            if ap_group_start_time_now >zoom_start_time and ap_group_start_time_now<zoom_start_time+zoom_length:
-                if ap_group_ap_num_now==1:
-                    textnow = '*'
-                else:
-                    textnow = str(ap_group_ap_num_now)
-                axs_zoomtrace[-1].text(ap_group_start_time_now,-2,textnow,ha = 'center')
+
+manuscript_figures_core.plot_sample_traces(plot_parameters)
+
+
+
+#%%#######################################################################SAMPLE TRACES - END################################################################################
+#################################################################################%%############################################################################################
+
+#%%
+#%%#######################################################################PROTEIN EXPRESSION - START################################################################################
+#################################################################################%%############################################################################################
+
+from utils import utils_anatomy
+
+injection_site_dict = utils_anatomy.digest_anatomy_json_file()
+sensor_f_corrs = utils_anatomy.export_in_vivo_brightnesses()
+#%%
+sensors = ['GCaMP7F','XCaMPgf','456','686','688']
+sensor_names = {'GCaMP7F': 'jGCaMP7f',
+                'XCaMPgf': 'XCaMPgf',
+                '456': 'jGCaMP8f',
+                '686': 'jGCaMP8m',
+                '688': 'jGCaMP8s'}
+fig_expression = plt.figure(figsize = [15,10])
+ax_rfp = fig_expression.add_subplot(2,2,1)
+ax_in_vivo = fig_expression.add_subplot(2,2,2)
+ax_in_vivo_gt = fig_expression.add_subplot(2,2,4)
+ax_fitc = fig_expression.add_subplot(2,2,3)
+sensor_num_list = list()
+rfp_intensity_list = list()
+fitc_intensity_list = list()
+in_vivo_f0_list = list()
+sensor_num_list_invivo = list()
+closest_to_median_files = list()
+sensor_num_list_gt = list()
+in_vivo_gt_f0_list = list()
+for sensor_i,sensor in enumerate(sensor_names.keys()):
+
+    baselines_ground_truth = (imaging_gt.CellBaselineFluorescence()*imaging_gt.SessionCalciumSensor()&'session_calcium_sensor = "{}"'.format(sensor)).fetch('cell_baseline_roi_f0_median')
+    baselines_ground_truth = baselines_ground_truth[np.isnan(baselines_ground_truth) == False]
+    idx = np.asarray(injection_site_dict['sensor'])==sensor
+    rfp_values = np.asarray(injection_site_dict['RFP'])[idx]
+    closest_to_median_files.append(np.asarray(injection_site_dict['filename'])[idx][np.argmin(np.abs(rfp_values-np.median(rfp_values)))])
+    fitc_values = np.asarray(injection_site_dict['FITC'])[idx]
+    sensor_nums = np.ones(sum(idx))*sensor_i
+    sensor_num_list.append(sensor_nums)
+    
+    invivo_data = np.concatenate(sensor_f_corrs[sensor])
+    invivo_data = invivo_data[invivo_data>0]
+    
+    if sensor_i == 0:
+        rfp_baselne = np.median(rfp_values)
+        fitc_baselne = np.median(fitc_values)
+        invivo_baseline = np.median(invivo_data)
+        invivo_gt_baseline = np.median(baselines_ground_truth)
+    
+    rfp_values = rfp_values/rfp_baselne
+    fitc_values = fitc_values/fitc_baselne
+    invivo_data = invivo_data/invivo_baseline
+    baselines_ground_truth = baselines_ground_truth/invivo_gt_baseline
+    
+    rfp_intensity_list.append(rfp_values)
+    fitc_intensity_list.append(fitc_values)
+    in_vivo_f0_list.append(invivo_data)
+    sensor_num_list_invivo.append(np.ones(len(invivo_data))*sensor_i)
+    in_vivo_gt_f0_list.append(baselines_ground_truth)
+    sensor_num_list_gt.append(np.ones(len(baselines_ground_truth))*sensor_i)
+    
+    ax_rfp.bar(sensor_i,np.median(rfp_values),edgecolor = sensor_colors[sensor],fill=False,linewidth = 4)
+    ax_fitc.bar(sensor_i,np.median(fitc_values),edgecolor = sensor_colors[sensor],fill=False,linewidth = 4)
+    ax_in_vivo_gt.bar(sensor_i,np.median(baselines_ground_truth),edgecolor = sensor_colors[sensor],fill=False,linewidth = 4)
+    #ax_in_vivo.bar(sensor_i,np.mean(invivo_data),edgecolor = sensor_colors[sensor],fill=False,linewidth = 4)
+    violin_parts  = ax_in_vivo.violinplot(invivo_data,positions = [sensor_i],widths = [.9],showmedians = True,showextrema = False)
+    violin_parts['bodies'][0].set_facecolor(sensor_colors[sensor])
+    violin_parts['bodies'][0].set_edgecolor(sensor_colors[sensor])
+    violin_parts['cmedians'].set_color(sensor_colors[sensor])
+ax_in_vivo.set_yscale('log')
+ax_in_vivo_gt.set_yscale('log')
+
 # =============================================================================
-#         break
 #     break
 # =============================================================================
-axs_longtrace[-1].set_ylim([-2,5])
-utils_plot.add_scalebar_to_fig(axs_longtrace[-1],
-                               axis = 'x',
-                               size = 5,
-                               conversion = 1,
-                               unit = r's',
-                               color = 'black',
-                               location = 'top right',
-                               linewidth = 5) 
-utils_plot.add_scalebar_to_fig(axs_longtrace[-1],
-                               axis = 'y',
-                               size = 100,
-                               conversion = 100,
-                               unit = r'% dF/F',
-                               color = 'black',
-                               location = 'top right',
-                               linewidth = 5) 
-
-axs_longtrace[-1].set_ylim([-2,5])
-#%
-utils_plot.add_scalebar_to_fig(axs_zoomtrace[-1],
-                               axis = 'x',
-                               size = 500,
-                               conversion = 1000,
-                               unit = r'ms',
-                               color = 'black',
-                               location = 'bottom right',
-                               linewidth = 5) 
-utils_plot.add_scalebar_to_fig(axs_zoomtrace[-1],
-                               axis = 'y',
-                               size = 100,
-                               conversion = 100,
-                               unit = r'% dF/F',
-                               color = 'black',
-                               linewidth = 5) 
-        #%
-figfile = os.path.join(figures_dir,'fig_sample_traces_long.{}')
-fig_longtrace.savefig(figfile.format('svg'))
-inkscape_cmd = ['/usr/bin/inkscape', '--file',figfile.format('svg'),'--export-emf', figfile.format('emf')]
-subprocess.run(inkscape_cmd )
-        
-figfile = os.path.join(figures_dir,'fig_sample_traces_zoom.{}')
-fig_zoom.savefig(figfile.format('svg'))
-inkscape_cmd = ['/usr/bin/inkscape', '--file',figfile.format('svg'),'--export-emf', figfile.format('emf')]
-subprocess.run(inkscape_cmd ) 
+sns.swarmplot(x =np.concatenate(sensor_num_list),y = np.concatenate(rfp_intensity_list),color='black',ax = ax_rfp,alpha = .9,size = 8)     
+sns.swarmplot(x =np.concatenate(sensor_num_list),y = np.concatenate(fitc_intensity_list),color='black',ax = ax_fitc,alpha = .9,size = 8)   
+sns.swarmplot(x =np.concatenate(sensor_num_list_gt),y = np.concatenate(in_vivo_gt_f0_list),color='black',ax = ax_in_vivo_gt,alpha = .9,size = 4)   
 
 
-figfile = os.path.join(figures_dir,'fig_sample_traces_mean_images.{}')
-fig_meanimages.savefig(figfile.format('svg'))
+sensor_names_list = []
+for sensor in sensor_names: sensor_names_list.append(sensor_names[sensor])
+ax_rfp.set_xticks(np.arange(len(sensors)))
+ax_rfp.set_xticklabels(sensor_names_list, rotation = 20)  
+ax_rfp.set_ylabel('Anti-GFP fluorescence')
+ax_in_vivo.set_xticks(np.arange(len(sensors)))
+ax_in_vivo.set_xticklabels(sensor_names_list, rotation = 20) 
+ax_in_vivo.set_ylabel('In vivo baseline fluorescence')
+ax_fitc.set_xticks(np.arange(len(sensors)))
+ax_fitc.set_xticklabels(sensor_names_list, rotation = 20) 
+ax_fitc.set_ylabel('Fixed native fluorescence')
+
+ax_in_vivo_gt.set_xticks(np.arange(len(sensors)))
+ax_in_vivo_gt.set_xticklabels(sensor_names_list, rotation = 20) 
+ax_in_vivo_gt.set_ylabel('In vivo ground truth baseline fluorescence')
+
+figfile = os.path.join(figures_dir,'fig_anatomy_expression_brightness.{}')
+fig_expression.savefig(figfile.format('svg'))
 inkscape_cmd = ['/usr/bin/inkscape', '--file',figfile.format('svg'),'--export-emf', figfile.format('emf')]
-subprocess.run(inkscape_cmd )
-#%%#######################################################################SAMPLE TRACES - END################################################################################
+subprocess.run(inkscape_cmd)
+
+#%%#######################################################################PROTEIN EXPRESSION - END################################################################################
 #################################################################################%%############################################################################################
