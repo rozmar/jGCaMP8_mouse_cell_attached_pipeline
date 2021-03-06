@@ -15,56 +15,7 @@ def gaussFilter(sig,sRate,sigma = .00005):
     #sigma = .00005
     sig_f = ndimage.gaussian_filter(sig,sigma/si)
     return sig_f
-# =============================================================================
-# #%%
-# # CellBaselineFluorescence(dj.Computed)    
-# @schema
-# class CellBaselineFluorescence(dj.Computed):#compensate f0 with depth and red channel spill, average over movies. (std..power dependence..?)
-#     definition = """
-#     -> ephys_cell_attached.Cell
-#     ---
-#     ephys_cell_type : varchar(20) # pyr / int / unidentified
-#     """
-#     def make(self, key):
-#         #%%
-#     counter = 0
-#     for key in ephys_cell_attached.Cell():
-#         counter += 1
-#         #%%
-#         key = {'subject_id':471991,
-#                'session':1,
-#                'cell_number':1}
-#         
-#         variablestoget = ['roi_f_min',
-#                           'roi_f_max',
-#                           'roi_f_median',
-#                           'movie_power',
-#                           'movie_depth',
-#                           ]
-#         
-#         data = (imaging_gt.MovieDepth()*imaging_gt.ROISweepCorrespondance()*imaging.ROITrace()*imaging.MoviePowerPostObjective()&key&'channel_number = 1').fetch(*variablestoget)
-#         data_dict = dict()
-#         for data_now,variable in zip(data,variablestoget):
-#             data_dict[variable] = np.asarray(data_now,float)
-#         neuropilvariablestoget = ['neuropil_f_min',
-#                                   'neuropil_f_max',
-#                                   'neuropil_f_median']
-#         data_neuropil = (imaging_gt.ROISweepCorrespondance()*imaging.ROINeuropilTrace()&key&'channel_number = 2'&'neuropil_number = 1').fetch(*neuropilvariablestoget)
-#         for data_now,variable in zip(data_neuropil,neuropilvariablestoget):
-#             data_dict[variable] = np.asarray(data_now,float)
-#         
-#         power = data_dict['movie_power']
-#         varnames = list(data_dict.keys())
-#         for varname in varnames:
-#             if 'roi' in varname or 'neuropil' in varname:
-#                 data_dict['{}_{}'.format(varname,'corr')]=data_dict[varname]/(power**2)*40**2
-#                 
-#         plt.plot(data_dict['neuropil_f_min_corr'],data_dict['roi_f_min_corr'],'ko')
-#         #%%
-#         if counter == 10000:
-#             break
-# =============================================================================
-#%
+
 @schema
 class CellBaselineFluorescence(dj.Computed):
     definition = """# 
@@ -341,17 +292,7 @@ class ROISweepCorrespondance(dj.Imported):
     -> ephys_cell_attached.Sweep
     -> imaging.ROI
     """
-# =============================================================================
-# @schema
-# class ROINeuropilCorrelationCorrected(dj.Computed):   
-# definition = """
-#     -> ROISweepCorrespondance
-#     -> imaging.MovieChannel
-#     -> imaging.ROINeuropil
-#     ---
-#     r_neu_corrected=null          : double
-#     """
-# =============================================================================
+
 @schema
 class ROINeuropilCorrelation(dj.Computed):
     definition = """
@@ -368,8 +309,7 @@ class ROINeuropilCorrelation(dj.Computed):
         
         #print(key)
         try: # try PCA instead of regression and low pass filtering
-            #%%
-            #key =  {'subject_id': 479571, 'session': 1, 'cell_number': 2, 'sweep_number': 2, 'movie_number': 10, 'motion_correction_method': 'Suite2P', 'roi_type': 'Suite2P', 'roi_number': 1, 'channel_number': 1, 'neuropil_number': 0}
+
             neuropil_estimation_decay_time = 3 # - after each AP this interval is skipped for estimating the contribution of the neuropil
             neuropil_estimation_filter_sigma = .05
             #neuropil_estimation_median_filter_time = 4 #seconds
@@ -401,21 +341,11 @@ class ROINeuropilCorrelation(dj.Computed):
             if sum(needed)> 100:
                 F_orig_filt = gaussFilter(F,framerate,sigma = neuropil_estimation_filter_sigma)
                 F_orig_filt_ultra_low =  ndimage.minimum_filter(F_orig_filt, size=int(neuropil_estimation_min_filter_time*framerate))
-# =============================================================================
-#                 try:
-#                     F_orig_filt_ultra_low = signal.medfilt(F_orig_filt, kernel_size=int(neuropil_estimation_median_filter_time*framerate)) #gaussFilter(F,framerate,sigma = neuropil_estimation_filter_sigma_highpass)
-#                 except:
-#                     F_orig_filt_ultra_low = signal.medfilt(F_orig_filt, kernel_size=int(neuropil_estimation_median_filter_time*framerate)+1) #gaussFilter(F,framerate,sigma = neuropil_estimation_filter_sigma_highpass)
-# =============================================================================
+
                 F_orig_filt_highpass = F_orig_filt-F_orig_filt_ultra_low + F_orig_filt_ultra_low[0]
                 Fneu_orig_filt = gaussFilter(Fneu,framerate,sigma = neuropil_estimation_filter_sigma)
                 Fneu_orig_filt_ultra_low =  ndimage.minimum_filter(Fneu_orig_filt, size=int(neuropil_estimation_min_filter_time*framerate))
-# =============================================================================
-#                 try:
-#                     Fneu_orig_filt_ultra_low =signal.medfilt(Fneu_orig_filt, kernel_size=int(neuropil_estimation_median_filter_time*framerate)) #gaussFilter(Fneu,framerate,sigma = neuropil_estimation_filter_sigma_highpass)
-#                 except:
-#                     Fneu_orig_filt_ultra_low =signal.medfilt(Fneu_orig_filt, kernel_size=int(neuropil_estimation_median_filter_time*framerate)+1) #gaussFilter(Fneu,framerate,sigma = neuropil_estimation_filter_sigma_highpass)
-# =============================================================================
+
                 Fneu_orig_filt_highpass = Fneu_orig_filt-Fneu_orig_filt_ultra_low + Fneu_orig_filt_ultra_low[0]
                 p=np.polyfit(Fneu_orig_filt_highpass[needed],F_orig_filt_highpass[needed],1)
                 R_neuopil_fit = np.corrcoef(Fneu_orig_filt_highpass[needed],F_orig_filt_highpass[needed])
@@ -424,8 +354,6 @@ class ROINeuropilCorrelation(dj.Computed):
                 key['r_neu_corrcoeff'] = R_neuopil_fit[0][1]
                 key['r_neu_pixelnum'] = sum(needed)
                 
-                #print(key)
-                #%%
                 self.insert1(key,skip_duplicates=True)
         except:
             print('ERROR!!!!! - {}'.format(key))
