@@ -117,7 +117,8 @@ for file in files:# = 'green_PMT_off_00002_00001.tif'
         
        # movie = np.asarray(image.data(),float)
         movie = image.data()
-        
+        #linemask_altered = linemask/np.min(linemask)
+        #movie = movie*(linemask_altered[np.newaxis,np.newaxis,:])
         if not offset_subtracted:
             movie -= np.asarray(metadata['metadata']['hChannels']['channelOffset'][1:-1].split(' '),int)[0]
         movie[movie<0] = 0
@@ -131,7 +132,7 @@ for file in files:# = 'green_PMT_off_00002_00001.tif'
 #         if np.min(means)<0:
 #             means = means -np.min(means)
 # =============================================================================
-        variances = np.nanvar(movie,0)#*(linemask[np.newaxis,:])
+        variances = np.nanvar(movie,0)#*(linemask_altered[np.newaxis,:])
         
 # =============================================================================
 #         means = ndimage.filters.gaussian_filter(means,1)
@@ -651,7 +652,7 @@ plot_parameters = {'alpha':.1}
 data = ephys_plot.plot_ap_features_scatter(plot_parameters,ap_data)
 
 #%% collect AP features per cell
-recording_mode = 'voltage clamp'
+recording_mode = 'current clamp'
 minapnum = 5
 minsnr = 10
 isi_percentile_needed = 1
