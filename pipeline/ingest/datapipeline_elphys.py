@@ -24,6 +24,8 @@ def populatemytables_core_paralel(arguments,runround):
     elif runround == 2:
         ephysanal_cell_attached.ActionPotential().populate(**arguments)
     elif runround ==3:
+        
+        ephysanal_cell_attached.CellMeanFiringRate().populate(**arguments)
         ephysanal_cell_attached.SweepAPQC().populate(**arguments)
         pass
         #ephysanal_cell_attached.CellSpikeParameters().populate(**arguments)
@@ -41,6 +43,7 @@ def populatemytables_core(arguments,runround):
     elif runround == 2:
         ephysanal_cell_attached.ActionPotential().populate(**arguments)
     elif runround ==3:
+        ephysanal_cell_attached.CellMeanFiringRate().populate(**arguments)
         ephysanal_cell_attached.SweepAPQC().populate(**arguments)
         pass
         #ephysanal_cell_attached.CellSpikeParameters().populate(**arguments)

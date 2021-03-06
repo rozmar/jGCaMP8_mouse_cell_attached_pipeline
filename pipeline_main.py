@@ -48,8 +48,9 @@ datapipeline_imaging.upload_ROIs_scanimage() # using only scanimage files
 datapipeline_imaging_gt.upload_ground_truth_ROIs_and_notes() # using the metadata from google drive in csv files
 datapipeline_imaging_gt.populatemytables(paralel = True, cores = 12)
 #%% 
-datapipeline_imaging_gt.populatemytables(paralel = True, cores = 12)
 datapipeline_elphys.populatemytables(paralel = True, cores = 12)
+datapipeline_imaging_gt.populatemytables(paralel = True, cores = 12)
+
 
 
 
@@ -63,17 +64,6 @@ datapipeline_elphys.populatemytables(paralel = True, cores = 12)
 
 
 
-
-# =============================================================================
-#                         np.savez_compressed(os.path.join(savedir,'sensor_{}_subject_{}_cell_{}_run_{}.npz'.format(sensor,subject,cell,runnum[0])),
-#                                                                      F=F,
-#                                                                      Fneu = Fneu,
-#                                                                      framerate = framerate,
-#                                                                      ap_times=ap_max_times,
-#                                                                      frame_times = frame_times,
-#                                                                      neuropil_r = neu_r)
-#                         fig.savefig(os.path.join(savedir,'sensor_{}_subject_{}_cell_{}_run_{}.png'.format(sensor,subject,cell,runnum[0])), bbox_inches='tight')
-# =============================================================================
 
 
 

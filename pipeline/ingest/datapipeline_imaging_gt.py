@@ -38,6 +38,7 @@ def populatemytables_core_paralel(arguments,runround):
         
     elif runround == 3:
         imaging_gt.MovieCalciumWaveSNR().populate(**arguments)
+        imaging_gt.CellBaselineFluorescence().populate(**arguments)
         
         
 
@@ -56,6 +57,7 @@ def populatemytables_core(arguments,runround):
         
     elif runround == 3:
         imaging_gt.MovieCalciumWaveSNR().populate(**arguments)
+        imaging_gt.CellBaselineFluorescence().populate(**arguments)
         
 def populatemytables(paralel=True,cores = 9):
     finished = False

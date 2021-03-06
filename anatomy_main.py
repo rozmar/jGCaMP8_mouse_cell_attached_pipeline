@@ -27,6 +27,7 @@ for metadata_file in metadata_files:
 sample_names = anatomy_metadata.keys()    
 channels = ['DAPI','FITC','RFP']
 #%%
+channels_to_calculate_max = ['RFP']
 import scipy.ndimage as ndimage
 import time
 filter_sigma = 50 # pixels ~ 6 microns
@@ -59,7 +60,7 @@ for sample_name in sample_names:
             z_positions.append(metadata_sample_row['Z location'])
             fnames.append(os.path.join(path,filename))
             readers.append(lazy_imread(os.path.join(path,filename)))  # doesn't actually read the file
-            if 'center_x' not in metadata_sample.keys() and (channel=='RFP' or channel == 'FITC'):
+            if 'center_x' not in metadata_sample.keys() and channel in channels_to_calculate_max:
                 data = readers[-1].compute()
                 data_filt=ndimage.filters.gaussian_filter(data,filter_sigma)
                 max_value = np.max(data_filt)
@@ -67,25 +68,32 @@ for sample_name in sample_names:
                 max_position_rfp.append(max_position)
                 max_value_rfp.append(max_value)
                 rotation_rfp.append(np.nan)
-            elif (channel=='RFP' or channel == 'FITC'):#:channel=='RFP':
-                pixel_num_to_cut = 1000
+# =============================================================================
+#                 print('done')
+#                 time.sleep(1000)
+# =============================================================================
+            elif channel in channels_to_calculate_max:
+                if '20x' in sample_name:
+                    pixel_num_to_cut = 2000
+                else:
+                    pixel_num_to_cut = 1000
                 max_position =np.asarray([metadata_sample_row['center_x'],metadata_sample_row['center_y']],int)
                 max_position_rfp.append(max_position)
                 data = readers[-1].compute()
-                data_cut = data[max_position[0]-pixel_num_to_cut:max_position[0]+pixel_num_to_cut,max_position[1]-pixel_num_to_cut:max_position[1]+pixel_num_to_cut]
+                data_cut = data[int(np.max([0,max_position[0]-pixel_num_to_cut])):max_position[0]+pixel_num_to_cut,int(np.max([0,max_position[1]-pixel_num_to_cut])):max_position[1]+pixel_num_to_cut]
                 data_filt=ndimage.filters.gaussian_filter(data_cut,filter_sigma)
                 max_value = np.max(data_filt)
                 max_value_rfp.append(np.mean(max_value))
                 rotation_rfp.append(metadata_sample_row['rotation'])
 # =============================================================================
 #                 print('done')
-#                 time.sleep(1000)
+#                 time.sleep(1)
 # =============================================================================
         metadata_all[sample_name][channel]['z_positions']=z_positions
         metadata_all[sample_name][channel]['fnames']=fnames
         metadata_all[sample_name][channel]['readers']=readers
         metadata_all[sample_name][channel]['readers']=readers
-        if (channel=='RFP' or channel == 'FITC'):#channel=='RFP':
+        if channel in channels_to_calculate_max:
             metadata_all[sample_name][channel]['max_pos']=max_position_rfp
             metadata_all[sample_name][channel]['max_val']=max_value_rfp
             metadata_all[sample_name][channel]['rotation']=rotation_rfp
@@ -104,6 +112,10 @@ for sample_name in sample_names:
         color = 'green'
     elif '456' in sample_name.lower():
         color = 'blue'
+    elif '686' in sample_name.lower():
+        color = 'red'
+    elif '688' in sample_name.lower():
+        color = 'black'
     color
     if '20x' in sample_name:
         continue
@@ -119,7 +131,7 @@ for sample_name in sample_names:
 ax_rfp.set_xlabel('distance along rostrocaudal axis (microns)')
 ax_rfp.set_ylabel('intensity on anti-GFP channel (AU)')
 ax_rfp.legend()               
-
+#%
 channel='FITC'
 for sample_name,max_idx in zip(samples_used,idxs):
     if 'xcamp' in sample_name.lower():
@@ -148,6 +160,7 @@ def rotate_rectangle(origin, points, angle):
 
     The angle should be given in radians.
     """
+    #angle = angle*-1 - 90
     ox, oy = origin
     px = points[:,0]
     py = points[:,1]
@@ -163,6 +176,8 @@ imageselector = label_selection.Gui()
 #%
 
 def show_image(force_default_rectangle = False):
+    rectangle_halfwidth = 2000
+    rectangle_halfheight = 1000
     if not type(force_default_rectangle)== bool:
         force_default_rectangle = False
     print('+++++++++++++++++++++++++++++show image starts')
@@ -175,6 +190,9 @@ def show_image(force_default_rectangle = False):
     print(['idx',idx,'force',force_default_rectangle,len(metadata_all[imageselector.sample]['selected_rectangle'][idx]),sum(np.abs(metadata_all[imageselector.sample]['selected_rectangle'][idx].flatten())),not force_default_rectangle and len(metadata_all[imageselector.sample]['selected_rectangle'][idx])>1 and sum(np.abs(metadata_all[imageselector.sample]['selected_rectangle'][idx].flatten()))>100])
     rectangle_center_position = metadata_all[imageselector.sample]['RFP']['max_pos'][idx]
     try:
+        if not np.isnan(metadata_all[imageselector.sample]['RFP']['rotation'][idx]):
+            print('calculating rotation')
+            1/0
         if not force_default_rectangle and len(metadata_all[imageselector.sample]['selected_rectangle'][idx])>1 and sum(np.abs(metadata_all[imageselector.sample]['selected_rectangle'][idx].flatten()))>100:
             image_to_cut = [metadata_all[imageselector.sample]['selected_rectangle'][idx]]
             print(['loaded rectange',image_to_cut])
@@ -185,14 +203,13 @@ def show_image(force_default_rectangle = False):
         
     except: #default rectangle
     #%
-        rectangle_halfwidth = 2000
-        rectangle_halfheight = 1000
+        
         image_to_cut =[np.array([[rectangle_center_position[0]-rectangle_halfwidth,rectangle_center_position[1]-rectangle_halfheight],
                        [rectangle_center_position[0]-rectangle_halfwidth,rectangle_center_position[1]+rectangle_halfheight],
                        [rectangle_center_position[0]+rectangle_halfwidth,rectangle_center_position[1]+rectangle_halfheight],
                        [rectangle_center_position[0]+rectangle_halfwidth,rectangle_center_position[1]-rectangle_halfheight]])]
         if not np.isnan(metadata_all[imageselector.sample]['RFP']['rotation'][idx]):
-            angle =  (metadata_all[imageselector.sample]['RFP']['rotation'][idx] +np.pi/2)
+            angle =  (metadata_all[imageselector.sample]['RFP']['rotation'][idx])*-1 #+np.pi/2
             image_to_cut=rotate_rectangle(rectangle_center_position, image_to_cut[0],angle)
             image_to_cut = [image_to_cut]
         #%
@@ -222,7 +239,24 @@ def show_image(force_default_rectangle = False):
         print('could not save data - rectangle layer not present?')
         pass
     print(image_to_cut)
-    rectangle_layer = viewer.add_shapes(image_to_cut, shape_type='polygon', edge_width=50, edge_color='white',face_color='transparent',name = 'image_to_cut')
+    try:
+        rectangle_layer = viewer.add_shapes(image_to_cut, shape_type='polygon', edge_width=50, edge_color='white',face_color='transparent',name = 'image_to_cut')
+    except:
+        pass
+        try:
+            viewer.layers.pop(1)
+        except:
+            pass
+        print('error displaying rectangle, falling back to default')
+        image_to_cut =[np.array([[rectangle_center_position[0]-rectangle_halfwidth,rectangle_center_position[1]-rectangle_halfheight],
+                       [rectangle_center_position[0]-rectangle_halfwidth,rectangle_center_position[1]+rectangle_halfheight],
+                       [rectangle_center_position[0]+rectangle_halfwidth,rectangle_center_position[1]+rectangle_halfheight],
+                       [rectangle_center_position[0]+rectangle_halfwidth,rectangle_center_position[1]-rectangle_halfheight]])]
+        if not np.isnan(metadata_all[imageselector.sample]['RFP']['rotation'][idx]):
+            angle =  (metadata_all[imageselector.sample]['RFP']['rotation'][idx])*-1 #+np.pi/2
+            image_to_cut=rotate_rectangle(rectangle_center_position, image_to_cut[0],angle)
+            image_to_cut = [image_to_cut]
+        rectangle_layer = viewer.add_shapes(image_to_cut, shape_type='polygon', edge_width=50, edge_color='white',face_color='transparent',name = 'image_to_cut')
     rectangle_layer.metadata = {'image_idx':idx,
                                 'sample':imageselector.sample,
                                 'channel':imageselector.channel,
@@ -258,7 +292,7 @@ imageselector.sample_changed.connect(changesample)
     
 
     
-#%%
+#%
 file_now = os.path.join(path,filename)
 #with napari.gui_qt():
 viewer = napari.view_image(readers[0].compute() )
@@ -285,7 +319,7 @@ def calculate_rectangle_rotation(viewer):
     if b <0:
         rotation += 180
     print([a,b,rotation])
-#%%
+#%
 image_layer = viewer.layers[0]
 
 #Z_menu = create_image_selector_menu(image_layer, z_positions)
@@ -299,12 +333,14 @@ changesample(imageselector.sample)
 
 #%% calculate center point and rotation
 for subject in metadata_all.keys():
+    
 # =============================================================================
 #     #%%
 #     subject = 'anm478342-UF456'
 # =============================================================================
     rectangles = metadata_all[subject]['selected_rectangle']
     z_positions = metadata_all[subject]['DAPI']['z_positions']
+#%
     angles =list()
     center_coords = list()
     for idx in range(rectangles.shape[0]):
@@ -318,20 +354,28 @@ for subject in metadata_all.keys():
         center_coord = np.mean(rectangle,0)
         angles.append(np.deg2rad(rotation))
         center_coords.append(center_coord)
-        metadata_all[subject]['rectangle_rotation'] = np.asarray(angles)
-        metadata_all[subject]['rectangle_center_x'] = np.asarray(center_coords)[:,0]
-        metadata_all[subject]['rectangle_center_y'] = np.asarray(center_coords)[:,1]
+        #%
+    metadata_all[subject]['rectangle_rotation'] = np.asarray(angles)
+    metadata_all[subject]['rectangle_center_x'] = np.asarray(center_coords)[:,0]
+    metadata_all[subject]['rectangle_center_y'] = np.asarray(center_coords)[:,1]
         
 #%% rotate and cut images
-Xsize_half = 1500
-Ysize_half = 2000
+Xsize_half_original = 1500
+Ysize_half_original = 2000
 save_dir = '/home/rozmar/Data/Anatomy/cropped_rotated'
-overwrite = True
+overwrite = False
 from scipy import ndimage
 from pathlib import Path
 from libtiff import TIFF
 for channel in ['RFP','DAPI','FITC']:
     for subject in metadata_all.keys():
+        if '20x' in subject:
+            Xsize_half = Xsize_half_original
+            Ysize_half = Ysize_half_original
+        else:
+            Xsize_half = Xsize_half_original/2
+            Ysize_half = Ysize_half_original/2
+            
 # =============================================================================
 #         #%%
 #         subject = 'anm478342-UF456'
@@ -362,7 +406,9 @@ for channel in ['RFP','DAPI','FITC']:
                     imgP = np.pad(img, [padY, padX], 'constant')
                     imgR = ndimage.rotate(imgP, np.rad2deg(metadata_all[subject]['rectangle_rotation'][idx])*+1+90, reshape=False)
                     imgC = imgR[padY[0] : -padY[1], padX[0] : -padX[1]]
-                    imgF = imgC[pivot[1]-Xsize_half:pivot[1]+Xsize_half,pivot[0]-Ysize_half:pivot[0]+Ysize_half]
+                    #imgF = imgC[pivot[1]-Xsize_half:pivot[1]+Xsize_half,pivot[0]-Ysize_half:pivot[0]+Ysize_half]
+                    imgF = imgC[int(np.max([0,pivot[1]-Xsize_half])):int(np.min([pivot[1]+Xsize_half,imgC.shape[0]])),int(np.max([pivot[0]-Ysize_half,0])):int(np.min([pivot[0]+Ysize_half,imgC.shape[1]]))]
+                    #%
 # =============================================================================
 #                     print('waiting')
 #                     time.sleep(1000)
