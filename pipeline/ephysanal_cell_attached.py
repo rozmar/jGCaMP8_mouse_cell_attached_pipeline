@@ -246,7 +246,7 @@ class IngestAPGroup(dj.Imported):
         key_original = key.copy()
         key_original['ap_group_complete'] = 1
         min_baseline_time = .1
-        max_integration_time = .1 #.1 for pyramidal cells 
+        max_integration_time = .02 #.1 for pyramidal cells 
         key_original['ap_group_min_baselime_time'] = min_baseline_time
         key_original['ap_group_max_integration_time'] = max_integration_time
         
