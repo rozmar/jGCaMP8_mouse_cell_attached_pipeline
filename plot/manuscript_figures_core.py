@@ -12,13 +12,21 @@ from matplotlib.lines import Line2D
 
 def plot_r_neu_distribution(sensor_colors,ca_wave_parameters,plot_parameters):
     #%%
+    sensor_names = {'GCaMP7F': 'jGCaMP7f',
+                'XCaMPgf': 'XCaMPgf',
+                '456': 'jGCaMP8f',
+                '686': 'jGCaMP8m',
+                '688': 'jGCaMP8s'}
     depth_fit_x = np.arange(50,200)
     depth_fit_order = 1
     radius_fit_x = np.arange(5,20)
     radius_fit_order = 1
     min_rneu_corrcoeff = .7
-    fig = plt.figure(figsize = [15,10])
-    ax_hist_rneu = fig.add_subplot(2,2,1)
+    fig = plt.figure(figsize = [15,15])
+    if 'ax' in plot_parameters.keys():
+        ax_hist_rneu = plot_parameters['ax']
+    else:
+        ax_hist_rneu = fig.add_subplot(2,2,1)
     ax_cumhist_rneu = ax_hist_rneu.twinx()
     ax_depth_rneu = fig.add_subplot(2,2,2)
     ax_radius_rneu = fig.add_subplot(2,2,3)
@@ -77,7 +85,7 @@ def plot_r_neu_distribution(sensor_colors,ca_wave_parameters,plot_parameters):
     legend_elements = list()
     for sensor in sensor_colors.keys():
         legend_elements.append(Line2D([0], [0], marker='o', color=sensor_colors[sensor], 
-                                      label=sensor,markerfacecolor=sensor_colors[sensor], markersize=8))
+                                      label=sensor_names[sensor],markerfacecolor=sensor_colors[sensor], markersize=8))
     ax_hist_rneu.legend(handles=legend_elements)   
     
     figfile = os.path.join(plot_parameters['figures_dir'],plot_parameters['fig_name']+'.{}')
@@ -85,8 +93,7 @@ def plot_r_neu_distribution(sensor_colors,ca_wave_parameters,plot_parameters):
     inkscape_cmd = ['/usr/bin/inkscape', '--file',figfile.format('svg'),'--export-emf', figfile.format('emf')]
     subprocess.run(inkscape_cmd )
     
-    
-
+    #%%
 def plot_stats(plot_properties,inclusion_criteria):
     ephys_snr_cond = 'sweep_ap_snr_dv_median>={}'.format(inclusion_criteria['min_sweep_ap_snr_dv_median'])
     ephys_hwstd_cond = 'sweep_ap_hw_std_per_median<={}'.format(inclusion_criteria['max_sweep_ap_hw_std_per_median'])
