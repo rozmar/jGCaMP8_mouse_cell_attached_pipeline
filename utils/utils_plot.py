@@ -5,6 +5,7 @@ from pipeline import pipeline_tools,lab, experiment, ephys_cell_attached,ephysan
 import scipy.ndimage as ndimage
 import scipy.stats as stats
 from scipy import signal
+
 def lighten_color(color, amount=0.5):
     """
     Lightens the given color by multiplying (1-luminosity) by the given amount.
@@ -76,7 +77,7 @@ def generate_superresolution_trace(x_conc,y_conc,bin_step,bin_size,function = 'm
         bin_std.append(np.std(y_conc[idxes]))
         bin_n.append(np.sum(idxes))
         if  dogaussian:
-            idxes_gauss = (x_conc>bin_center-bin_size) & (x_conc<bin_center+bin_size)
+            idxes_gauss = (x_conc>bin_center-bin_size*2) & (x_conc<bin_center+bin_size*2)
             gauss_f = stats.norm(bin_center,bin_size/4)
             gauss_w = gauss_f.pdf(x_conc[idxes_gauss])
             gauss_w = gauss_w/sum(gauss_w)
@@ -216,7 +217,7 @@ def collect_ca_wave_parameters(ca_wave_parameters,cawave_properties_needed,ephys
     for sensor in ca_wave_parameters['sensors']:
         print(sensor)
         key['session_calcium_sensor'] = sensor
-        cawaves_all = imaging.MovieChannel()*imaging_gt.SessionROIFPercentile()*ephysanal_cell_attached.SweepAPQC()*ephysanal_cell_attached.CellSpikeParameters()*imaging_gt.ROIDwellTime()*imaging.ROI()*imaging.MoviePowerPostObjective()*imaging.MovieMetaData()*imaging.MovieNote()*imaging_gt.SessionCalciumSensor()*ephysanal_cell_attached.APGroup()*imaging_gt.CalciumWave.CalciumWaveProperties()*imaging_gt.CalciumWave()*imaging_gt.CalciumWave.CalciumWaveNeuropil()&'movie_note_type = "quality"'
+        cawaves_all = ephysanal_cell_attached.CellMeanFiringRate()*imaging.MovieChannel()*imaging_gt.SessionROIFPercentile()*ephysanal_cell_attached.SweepAPQC()*ephysanal_cell_attached.CellSpikeParameters()*imaging_gt.ROIDwellTime()*imaging.ROI()*imaging.MoviePowerPostObjective()*imaging.MovieMetaData()*imaging.MovieNote()*imaging_gt.SessionCalciumSensor()*ephysanal_cell_attached.APGroup()*imaging_gt.CalciumWave.CalciumWaveProperties()*imaging_gt.CalciumWave()*imaging_gt.CalciumWave.CalciumWaveNeuropil()&'movie_note_type = "quality"'
         cellwave_by_cell_list = list()
         for cellkey in ephys_cell_attached.Cell():
 # =============================================================================
@@ -473,3 +474,7 @@ def calculate_superresolution_traces_for_all_sensors(ca_traces_dict,ca_traces_di
                         superresolution_traces[sensor]['{}_raw_time_per_cell'.format(tracename)].append(x_conc)
                         superresolution_traces[sensor]['{}_raw_per_cell'.format(tracename)].append(y_conc)
     return superresolution_traces
+
+
+
+
