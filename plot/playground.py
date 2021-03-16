@@ -31,6 +31,19 @@ matplotlib.rcParams['font.sans-serif'] = ['Tahoma']
 # #%%
 # plt.plot(f0,std/f0,'ko',markersize = 1,alpha = .1)
 # =============================================================================
+#%% ROI weights are not consistent
+weights,sensors = (imaging_gt.SessionCalciumSensor()*imaging.ROI()).fetch('roi_weights','session_calcium_sensor')
+weights_sum = list()
+for weight in weights: weights_sum.append(np.sum(weight))
+unique_sensors
+plt.hist(weights_sum)
+plt.hist(weights_sum,1000)
+plt.yscale('log')
+plt.ylabel('# of ROIs')
+plt.xlabel('sum of pixel weights')
+
+
+
 
 #%% neuropil vs LFP -  for Jerome at Allen
 import scipy
