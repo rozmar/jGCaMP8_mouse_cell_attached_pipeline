@@ -31,6 +31,113 @@ matplotlib.rcParams['font.sans-serif'] = ['Tahoma']
 # #%%
 # plt.plot(f0,std/f0,'ko',markersize = 1,alpha = .1)
 # =============================================================================
+
+#%% neuropil vs LFP -  for Jerome at Allen
+import scipy
+import scaleogram as scg
+sweeps=ephys_cell_attached.Sweep()
+for i, sweep in enumerate(sweeps):
+    if i<395:#395
+        continue
+    sweep_now = ephys_cell_attached.Sweep()*ephys_cell_attached.SweepResponse()*ephys_cell_attached.SweepMetadata()&'recording_mode = "current clamp"'&sweep
+    if len(sweep_now )>0:
+        neuropil_key = {'motion_correction_method': 'Suite2P',
+                        'roi_type':'Suite2P',
+                        'neuropil_number':1,
+                        'channel_number':1}
+        sweep_start_time =  sweep_now.fetch1('sweep_start_time')
+        neuropil_f,frame_times  = (sweep_now*imaging_gt.ROISweepCorrespondance()*imaging.ROINeuropilTrace()*imaging.MovieFrameTimes()&neuropil_key).fetch1('neuropil_f','frame_times')
+        
+        print(i)
+        trace,sample_rate = sweep_now.fetch1('response_trace','sample_rate')
+        ap_max_index = (ephysanal_cell_attached.ActionPotential()*sweep_now).fetch('ap_max_index')
+        trace_no_ap = trace.copy()
+        step_back = int(sample_rate*.001)
+        step_forward = int(sample_rate*.01)
+        for ap_max_index_now in ap_max_index:
+            start_idx = np.max([0,ap_max_index_now-step_back])
+            end_idx = np.min([len(trace),ap_max_index_now+step_forward])
+            trace_no_ap[start_idx:end_idx] = trace[start_idx]
+        
+        cell_recording_start, session_time = (ephys_cell_attached.Cell()*experiment.Session()&sweep_now).fetch1('cell_recording_start', 'session_time')
+        ephys_time = np.arange(len(trace))/sample_rate
+        frame_times = frame_times - ((cell_recording_start-session_time).total_seconds()+float(sweep_start_time))
+        frame_rate = 1/np.diff(frame_times)[0]
+        trace_highpass = utils_ephys.hpFilter(trace_no_ap, .3, 3, sample_rate, padding = True)
+        trace_bandpass = utils_ephys.lpFilter(trace_highpass, 200, 3, sample_rate, padding = True)
+        trace_truncated = trace_highpass[int(sample_rate)*10:-int(sample_rate)*10]
+        percentiles = np.percentile(trace_truncated,[10,90])
+        trace_truncated = trace_truncated-percentiles[0]
+        trace_truncated = trace_truncated/(np.diff(percentiles))
+        out = scipy.signal.welch(trace_truncated, fs=sample_rate,nperseg = 5*sample_rate)
+        needed = (out[0]>.1) & (out[0]<50)
+        #%
+        downsample_factor = int(round(sample_rate / frame_rate))
+        trace_bandpass_downsampled = trace_bandpass[int(downsample_factor/2)::downsample_factor]
+        trace_bandpass_downsampled = trace_bandpass_downsampled[:len(neuropil_f)]
+        std_window = int(frame_rate*.5)
+        ephys_std = utils_ephys.rollingfun(trace_bandpass_downsampled, window = std_window, func = 'std')
+        xcorr = scipy.signal.correlate(scipy.stats.zscore(neuropil_f),scipy.stats.zscore(ephys_std), mode='full', method='direct')
+        xcorr_t = np.arange(len(xcorr))/frame_rate-len(frame_times)/frame_rate
+        #%
+        fig = plt.figure(figsize = [10,10])
+        ax_o = fig.add_subplot(511)
+        ax_e = fig.add_subplot(512,sharex = ax_o)
+        ax_e_std = fig.add_subplot(513,sharex = ax_o)
+        ax_fft = fig.add_subplot(515)
+        ax_xcorr = fig.add_subplot(514)
+        ax_o.plot(frame_times,scipy.stats.zscore(neuropil_f))
+        ax_e.plot(ephys_time,scipy.stats.zscore(trace_bandpass))
+        #ax_e.plot(frame_times,trace_bandpass_downsampled)
+        ax_fft.plot(out[0][needed],out[1][needed]*out[0][needed])
+        #ax_e.set_title(i)
+        ax_xcorr.plot(xcorr_t,xcorr)
+        ax_e_std.plot(frame_times,scipy.stats.zscore(ephys_std))
+        ax_o.set_ylabel('neuropil signal')
+        ax_e.set_ylabel('LFP')
+        
+        ax_e_std.set_ylabel('std filtered LFP')
+        ax_e_std.set_xlabel('time (s)')
+        ax_xcorr.set_ylabel('Xcorr')
+        ax_xcorr.set_xlabel('time (s)')
+        #%
+        break
+        
+        #%%
+        
+# =============================================================================
+#         ephys_std = utils_ephys.rollingfun(trace_bandpass, window = 10, func = 'std')
+#         
+#         #%%
+# sample_rate_psd = 500        
+# downsample_factor_psd = int(sample_rate/sample_rate_psd)
+# trace_to_psd = trace_bandpass[::downsample_factor_psd]
+# time_trace_to_psd = ephys_time[::downsample_factor_psd]
+# scg.set_default_wavelet('morl')
+# signal_length = len(trace_to_psd)
+# 
+# freqs = np.logspace(1,np.log10(300),50)
+# intervals = sample_rate_psd/freqs
+# #%
+# # choose default wavelet function 
+# 
+# 
+# 
+# # range of scales to perform the transform
+# scales = scg.periods2scales( intervals )
+# 
+# 
+# # plot the signal 
+# fig1, ax1 = plt.subplots(1, 1, figsize=(9, 3.5));  
+# ax1.plot(time_trace_to_psd, trace_to_psd, linewidth=3, color='blue')
+# 
+# # the scaleogram
+# out = scg.cws(trace_to_psd[:signal_length], scales=scales, figsize=(10, 4.0), coi = True, ylabel="Period", xlabel="Time",yaxis = 'frequency')
+#         
+# =============================================================================
+
+
+
 #%% model an image
 framenum = 100
 photon_per_dwelltime = .5

@@ -10,11 +10,153 @@ import scipy.ndimage as ndimage
 import scipy.signal as signal
 schema = dj.schema(get_schema_name('imaging_gt'),locals()) # TODO ez el van baszva
 import numpy as np
+
+import scipy
 def gaussFilter(sig,sRate,sigma = .00005):
     si = 1/sRate
     #sigma = .00005
     sig_f = ndimage.gaussian_filter(sig,sigma/si)
     return sig_f
+
+
+def rollingfun(y, window = 10, func = 'mean'):
+    """
+    rollingfun
+        rolling average, min, max or std
+    
+    @input:
+        y = array, window, function (mean,min,max,std)
+    """
+    
+    if window >len(y):
+        window = len(y)-1
+    y = np.concatenate([y[window::-1],y,y[:-1*window:-1]])
+    ys = list()
+    for idx in range(window):    
+        ys.append(np.roll(y,idx-round(window/2)))
+    if func =='mean':
+        out = np.nanmean(ys,0)[window:-window]
+    elif func == 'min':
+        out = np.nanmin(ys,0)[window:-window]
+    elif func == 'max':
+        out = np.nanmax(ys,0)[window:-window]
+    elif func == 'std':
+        out = np.nanstd(ys,0)[window:-window]
+    elif func == 'median':
+        out = np.nanmedian(ys,0)[window:-window]
+    else:
+        print('undefinied funcion in rollinfun')
+    return out
+
+def hpFilter(sig, HPfreq, order, sRate, padding = True):
+    """
+    High pass filter
+    -enable padding to avoid edge artefact
+    """
+    padlength=10000
+    sos = signal.butter(order, HPfreq, 'hp', fs=sRate, output='sos')
+    if padding: 
+        sig_out = signal.sosfilt(sos, np.concatenate([sig[padlength-1::-1],sig,sig[:-padlength-1:-1]]))
+        sig_out = sig_out[padlength:-padlength]
+    else:
+        sig_out = signal.sosfilt(sos, sig)
+    return sig_out
+
+def lpFilter(sig, LPfreq, order, sRate, padding = True):
+    """
+    High pass filter
+    -enable padding to avoid edge artefact
+    """
+    padlength=10000
+    sos = signal.butter(order, LPfreq, 'lp', fs=sRate, output='sos')
+    if padding: 
+        sig_out = signal.sosfilt(sos, np.concatenate([sig[padlength-1::-1],sig,sig[:-padlength-1:-1]]))
+        sig_out = sig_out[padlength:-padlength]
+    else:
+        sig_out = signal.sosfilt(sos, sig)
+    return sig_out
+
+@schema
+class LFPNeuropilCorrelation(dj.Computed):
+    definition = """
+    -> ephys_cell_attached.Sweep
+    ---
+    lfp_neuropil_xcorr = null              : longblob #
+    lfp_neuropil_xcorr_time = null         : longblob #
+    lfp_neuropil_xcorr_max = null          : double
+    lfp_neuropil_xcorr_max_t = null          : double
+    lfp_fft=null                           : longblob
+    lfp_fft_time=null                           : longblob
+    lfp_fft_max = null                     :double
+    lfp_fft_max_t = null                     :double
+    
+    """
+    
+    def make(self,key):
+        #key = {'subject_id': 478348, 'session': 1, 'cell_number': 2, 'sweep_number': 1}
+        sweep_now = ephys_cell_attached.Sweep()*ephys_cell_attached.SweepResponse()*ephys_cell_attached.SweepMetadata()&'recording_mode = "current clamp"'&key
+        try:
+            if len(sweep_now )>0:
+                neuropil_key = {'motion_correction_method': 'Suite2P',
+                                'roi_type':'Suite2P',
+                                'neuropil_number':1,
+                                'channel_number':1}
+                sweep_start_time =  sweep_now.fetch1('sweep_start_time')
+                neuropil_f,frame_times  = (sweep_now*ROISweepCorrespondance()*imaging.ROINeuropilTrace()*imaging.MovieFrameTimes()&neuropil_key).fetch1('neuropil_f','frame_times')
+                
+               # print(i)
+                trace,sample_rate = sweep_now.fetch1('response_trace','sample_rate')
+                ap_max_index = (ephysanal_cell_attached.ActionPotential()*sweep_now).fetch('ap_max_index')
+                trace_no_ap = trace.copy()
+                step_back = int(sample_rate*.001)
+                step_forward = int(sample_rate*.01)
+                for ap_max_index_now in ap_max_index:
+                    start_idx = np.max([0,ap_max_index_now-step_back])
+                    end_idx = np.min([len(trace),ap_max_index_now+step_forward])
+                    trace_no_ap[start_idx:end_idx] = trace[start_idx]
+                
+                cell_recording_start, session_time = (ephys_cell_attached.Cell()*experiment.Session()&sweep_now).fetch1('cell_recording_start', 'session_time')
+                #ephys_time = np.arange(len(trace))/sample_rate
+                frame_times = frame_times - ((cell_recording_start-session_time).total_seconds()+float(sweep_start_time))
+                frame_rate = 1/np.diff(frame_times)[0]
+                trace_highpass = hpFilter(trace_no_ap, .3, 3, sample_rate, padding = True)
+                trace_bandpass = lpFilter(trace_highpass, 200, 3, sample_rate, padding = True)
+                trace_truncated = trace_highpass[int(sample_rate)*10:-int(sample_rate)*10]
+                percentiles = np.percentile(trace_truncated,[10,90])
+                trace_truncated = trace_truncated-percentiles[0]
+                trace_truncated = trace_truncated/(np.diff(percentiles))
+                out = scipy.signal.welch(trace_truncated, fs=sample_rate,nperseg = 5*sample_rate)
+                needed = (out[0]>.1) & (out[0]<50)
+                #%
+                downsample_factor = int(round(sample_rate / frame_rate))
+                trace_bandpass_downsampled = trace_bandpass[int(downsample_factor/2)::downsample_factor]
+                trace_bandpass_downsampled = trace_bandpass_downsampled[:len(neuropil_f)]
+                std_window = int(frame_rate*.5)
+                ephys_std = rollingfun(trace_bandpass_downsampled, window = std_window, func = 'std')
+                xcorr = scipy.signal.correlate(scipy.stats.zscore(neuropil_f),scipy.stats.zscore(ephys_std), mode='full', method='direct')
+                xcorr_t = np.arange(len(xcorr))/frame_rate-len(frame_times)/frame_rate
+                xcorr_needed = (xcorr_t>-5) & (xcorr_t<5)
+                key['lfp_neuropil_xcorr'] = xcorr[xcorr_needed]
+                key['lfp_neuropil_xcorr_time'] = xcorr_t[xcorr_needed]
+                key['lfp_fft'] = out[1][needed]*out[0][needed]
+                key['lfp_fft_time'] = out[0][needed]
+                
+                lfp_idx = np.argmax(key['lfp_fft'])
+                xcorr_idx = np.argmax(key['lfp_neuropil_xcorr'])
+                
+                key['lfp_fft_max'] = key['lfp_fft'][lfp_idx]
+                key['lfp_fft_max_t'] = key['lfp_fft_time'][lfp_idx]
+                key['lfp_neuropil_xcorr_max'] = key['lfp_neuropil_xcorr'][xcorr_idx]
+                key['lfp_neuropil_xcorr_max_t'] = key['lfp_neuropil_xcorr_time'][xcorr_idx]
+                
+            self.insert1(key,skip_duplicates=True)
+        except:
+            print('error with {}'.format(key))
+
+
+        
+
+
 
 @schema
 class CellBaselineFluorescence(dj.Computed):
