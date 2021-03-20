@@ -19,7 +19,7 @@ def get_schema_name(name):
     elif dj.config['project'] == 'voltage imaging':
         return 'group_shared_voltageimaging-'+name
     elif dj.config['project'] == 'GENIE Calcium Imaging':
-        return 'group_shared_geniecalciumimaging-'+name
+        return 'group_shared_geniecalciumimaging_v2-'+name
     #return 'rozmar_foraging-'+name
 # =============================================================================
 #     try:

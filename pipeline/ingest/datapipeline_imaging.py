@@ -424,8 +424,13 @@ def upload_ROIs_scanimage_core(subject_id):
         try:
             #%
             iscell = np.load(os.path.join(roi_dir,'iscell.npy'))
-            F =  np.load(os.path.join(roi_dir,'F.npy'))
-            F_chan2 =  np.load(os.path.join(roi_dir,'F_chan2.npy'))
+            try:
+                F =  np.load(os.path.join(roi_dir,'F_allow_orverlap.npy'))
+                F_chan2 =  np.load(os.path.join(roi_dir,'F_chan2_allow_orverlap.npy'))
+            except:
+                print('could not load ROIs with overlaps, falling back to original: {}'.format(roi_dir))
+                F =  np.load(os.path.join(roi_dir,'F.npy'))
+                F_chan2 =  np.load(os.path.join(roi_dir,'F_chan2.npy'))
             Fneu =  np.load(os.path.join(roi_dir,'Fneu.npy'))
             Fneu_chan2 = np.load(os.path.join(roi_dir,'Fneu_chan2.npy'))
             roi_stat = list(np.load(os.path.join(roi_dir,'stat.npy'),allow_pickle=True))

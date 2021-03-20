@@ -6,7 +6,8 @@ import numpy as np
 from suite2p import default_ops as s2p_default_ops
 from suite2p import run_s2p
 from suite2p import classification
-from suite2p.detection.masks import create_neuropil_masks, create_cell_pix
+from suite2p.detection.masks import create_neuropil_masks, create_cell_pix, create_cell_mask
+from suite2p.extraction.extract import extract_traces
 import shutil
 import time
 import datetime
@@ -270,6 +271,72 @@ def batch_run_suite2p(s2p_params):
                     os.rmdir(os.path.join(ops['data_path'][0],'suite2p'))
                     
 #%%
+                    
+                    
+                    
+                    
+                    
+#%%
+def suite2p_export_ROIs_with_overlap(s2p_params):
+    #%%
+    
+    sessions = os.listdir(s2p_params['basedir_out'])
+    sessions.sort()
+    for session in sessions:
+        session_dir = os.path.join(s2p_params['basedir_out'],session)
+        if not os.path.isdir(session_dir):
+            continue
+        
+        cells = os.listdir(session_dir)
+        for cell in cells:
+            cell_dir = os.path.join(session_dir,cell)
+            movies = os.listdir(cell_dir)
+            for movie in movies:
+                #t0 = time.time()
+                movie_dir = os.path.join(cell_dir,movie,'plane0')
+                #%
+                print('extracting roi from {}'.format(movie_dir))
+                try:
+                    iscell = np.load(os.path.join(movie_dir,'iscell.npy'))
+                    roi_stat = list(np.load(os.path.join(movie_dir,'stat.npy'),allow_pickle=True))
+                    reg_metadata = np.load(os.path.join(movie_dir,'ops.npy'),allow_pickle = True).tolist()
+                except:
+                    print('missing or corrupt suite2p files, skipping {}'.format(movie))
+                    continue
+                if reg_metadata['allow_overlap']:
+                    print('overlap is already enabled')
+                    continue
+                cell_masks = list()
+                for roi_stat_now in roi_stat:
+                    cell_mask = create_cell_mask(roi_stat_now,Ly=reg_metadata['Ly'], Lx=reg_metadata['Lx'], allow_overlap=True)
+                    #break
+                    cell_masks.append(cell_mask)
+                cell_pix = create_cell_pix(roi_stat, Ly=reg_metadata['Ly'], Lx=reg_metadata['Lx'], allow_overlap=reg_metadata['allow_overlap'])
+                neuropil_mask = create_neuropil_masks(ypixs=[stat['ypix'] for stat in roi_stat],
+                                                      xpixs=[stat['xpix'] for stat in roi_stat],
+                                                      cell_pix=cell_pix,
+                                                      inner_neuropil_radius=reg_metadata['inner_neuropil_radius'],
+                                                      min_neuropil_pixels=reg_metadata['min_neuropil_pixels'])
+                
+                reg_file  = os.path.join(movie_dir,'data.bin')
+                reg_metadata['allow_overlap'] = True
+                F,Fneu,ops = extract_traces(reg_metadata, cell_masks, neuropil_mask, reg_file)  
+                #%
+                np.save(os.path.join(movie_dir,'F_allow_orverlap.npy'),F,allow_pickle = True)
+                reg_file_chan2  = os.path.join(movie_dir,'data_chan2.bin')
+                F_chan2,Fneu_chan2,ops = extract_traces(reg_metadata, cell_masks, neuropil_mask, reg_file_chan2)    
+                np.save(os.path.join(movie_dir,'F_chan2_allow_orverlap.npy'),F_chan2,allow_pickle = True)
+# =============================================================================
+#                 break
+#             break
+#         break
+# =============================================================================
+    
+              
+ #%%                   
+                    
+                    
+                    
 def suite2p_extract_altered_neuropil(s2p_params,neuropil_pixel_nums = [4,8,16]):
     #%
     
