@@ -175,14 +175,20 @@ def load_wavesurfer_file(WS_path): # works only for single sweep files
 #%%
     
 def populateelphys_wavesurfer(cores = 4):
-
-    ray.init(num_cpus = cores)
-    result_ids = []
-    subject_ids=np.unique(lab.Subject().fetch('subject_id'))
-    for subject_id in subject_ids:
-        result_ids.append(populateelphys_wavesurfer_core.remote(subject_id))            
-    ray.get(result_ids)       
-    ray.shutdown()
+    finished = False
+    while not finished:
+        try:
+            ray.init(num_cpus = cores)
+            result_ids = []
+            subject_ids=np.unique(lab.Subject().fetch('subject_id'))
+            for subject_id in subject_ids:
+                result_ids.append(populateelphys_wavesurfer_core.remote(subject_id))            
+            ray.get(result_ids)       
+            ray.shutdown()
+            finished = True
+        except dj.errors.LostConnectionError:
+            print('datajoint connection error, trying again')
+            ray.shutdown()
 
 @ray.remote
 def populateelphys_wavesurfer_core(subject_id):
