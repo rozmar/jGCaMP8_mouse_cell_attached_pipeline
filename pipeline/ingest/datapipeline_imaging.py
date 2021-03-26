@@ -290,9 +290,16 @@ def upload_movie_metadata_scanimage_core(movie_dir_now,key,repository,repodir): 
 def upload_movie_registration_scanimage():
     subject_ids = np.unique(imaging.Movie().fetch('subject_id'))
     for subject_id in subject_ids:
-        if len(imaging.RegisteredMovie()&'subject_id = {}'.format(subject_id)&'motion_correction_method= "Suite2P"')==0:
-            print('loading registration for {}'.format(subject_id))
-            upload_movie_registration_scanimage_core(subject_id)
+        finished = False
+        while not finished:
+            try:
+                if len(imaging.RegisteredMovie()&'subject_id = {}'.format(subject_id)&'motion_correction_method= "Suite2P"')==0:
+                    print('loading registration for {}'.format(subject_id))
+                    upload_movie_registration_scanimage_core(subject_id)
+                finished = True
+            except:
+                print('datajoint connection error, trying again')
+                dj.conn().connect()
     
 
 def upload_movie_registration_scanimage_core(subject_id):
@@ -398,8 +405,15 @@ def upload_ROIs_scanimage():
     #%%
     subject_ids = np.unique(imaging.Movie().fetch('subject_id'))
     for subject_id in subject_ids:
-        print('loading ROIs for {}'.format(subject_id))
-        upload_ROIs_scanimage_core(subject_id)
+        finished = False
+        while not finished:
+            try:
+                print('loading ROIs for {}'.format(subject_id))
+                upload_ROIs_scanimage_core(subject_id)
+                finished = True
+            except:
+                print('datajoint connection error, trying again')
+                dj.conn().connect()
        #%%     
 def upload_ROIs_scanimage_core(subject_id):
     #%%
