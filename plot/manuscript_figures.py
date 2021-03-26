@@ -11,6 +11,8 @@ from utils import utils_plot,utils_ephys
 import pandas as pd
 import seaborn as sns
 import matplotlib
+
+import matplotlib.gridspec as gridspec
 sensor_colors ={'GCaMP7F':'green',
                 'XCaMPgf':'orange',
                 '456':'blue',
@@ -430,7 +432,149 @@ fig.savefig(figfile.format('svg'))
 inkscape_cmd = ['/usr/bin/inkscape', '--file',figfile.format('svg'),'--export-emf', figfile.format('emf')]
 subprocess.run(inkscape_cmd )
 
+#%%
 
+
+
+#%% time resolution of superresolution analysis
+leave_out_putative_interneurons = True
+leave_out_putative_pyramidal_cells = False
+ca_wave_parameters = {'only_manually_labelled_movies':False,
+                      'max_baseline_dff':.5,
+                      'min_baseline_dff':-.5,# TODO check why baseline dff so low
+                      'min_ap_snr':10,
+                      'min_pre_isi':1,
+                      'min_post_isi':.5,
+                      'max_sweep_ap_hw_std_per_median':.2,
+                      'min_sweep_ap_snr_dv_median':10,
+                      'gaussian_filter_sigma':5,#0,5,10,20,50
+                      'neuropil_subtraction':'0.8',#'none','0.7','calculated','0.8'
+                      'neuropil_number':1,#0,1 # 0 is 2 pixel , 1 is 4 pixels left out around the cell
+                      'sensors': ['XCaMPgf','GCaMP7F','456','686','688'], # this determines the order of the sensors,#'XCaMPgf'
+                      'ephys_recording_mode':'current clamp',
+                      'minimum_f0_value':20, # when the neuropil is bright, the F0 can go negative after neuropil subtraction
+                      'min_channel_offset':100 # PMT error
+                      }
+if leave_out_putative_interneurons:
+    ca_wave_parameters['max_ap_peak_to_trough_time_median']=0.65
+    ca_wave_parameters['min_ap_ahp_amplitude_median']=.1
+else:
+    ca_wave_parameters['max_ap_peak_to_trough_time_median']=-100
+    ca_wave_parameters['min_ap_ahp_amplitude_median']=100
+if leave_out_putative_pyramidal_cells:
+    ca_wave_parameters['min_ap_peak_to_trough_time_median']=0.65
+    ca_wave_parameters['max_ap_ahp_amplitude_median']=.1
+else:
+    ca_wave_parameters['min_ap_peak_to_trough_time_median']=100
+    ca_wave_parameters['max_ap_ahp_amplitude_median']=-100  
+key_first_ap = {}
+key_all_ap = {'session': 1, 'gaussian_filter_sigma': 0, 'neuropil_subtraction': '0.8', 'neuropil_number': 1,'ap_group_ap_num':1}        
+snr_cond = 'ap_group_min_snr_dv>{}'.format(20)
+preisi_cond = 'ap_group_pre_isi>{}'.format(ca_wave_parameters['min_pre_isi'])
+postisi_cond = 'ap_group_post_isi>{}'.format(ca_wave_parameters['min_post_isi'])
+basline_dff_cond = 'cawave_baseline_dff_global<{}'.format(ca_wave_parameters['max_baseline_dff'])
+basline_dff_cond_2 = 'cawave_baseline_dff_global>{}'.format(ca_wave_parameters['min_baseline_dff'])
+cawave_snr_cond = 'cawave_snr > {}'.format(5)
+#sensor_cond = 'session_calcium_sensor = "{}"'.format('688')
+big_table = ephysanal_cell_attached.APGroup()*imaging_gt.SessionCalciumSensor()*imaging_gt.CalciumWave.CalciumWaveProperties()*ephys_cell_attached.SweepMetadata()*ephysanal_cell_attached.APGroupTrace()*imaging_gt.CalciumWave.CalciumWaveNeuropil()*imaging_gt.CalciumWave()#imaging_gt.SessionCalciumSensor()*imaging_gt.CalciumWave.CalciumWaveProperties()*ephysanal_cell_attached.APGroup()
+subject_ids,cell_numbers,ap_group_numbers,sweep_numbers,cawave_snr,session_calcium_sensors = (big_table&key_all_ap& snr_cond & preisi_cond & postisi_cond & basline_dff_cond & basline_dff_cond_2 & cawave_snr_cond ).fetch('subject_id','cell_number','ap_group_number','sweep_number','cawave_snr','session_calcium_sensor')#sensor_cond
+cells_already_got = []
+roi_percentiles = [0.05,0.95]
+
+
+
+
+rois_overlaid = np.zeros([128,512])
+roi_times = list()
+roi_centroid_idxs = list()
+lineperiods = list()
+roi_mask_on_slow_axis = list()
+roi_mask_list = list()
+sensor_list = list()
+mean_image_to_show = list()
+mean_image_data_idx = []
+for subject_id,cell_number,sensor in zip(subject_ids,cell_numbers,session_calcium_sensors):
+    cell_id_now = '{}_{}'.format(subject_id,cell_number)
+    if cell_id_now not in cells_already_got:
+        
+        key = {'subject_id':subject_id,
+               'cell_number':cell_number}
+        movie_numbers = (imaging_gt.ROISweepCorrespondance()&key).fetch('movie_number')
+        for movie_number in movie_numbers:
+            key['movie_number'] = movie_number#movie_numbers[-1]
+            key['channel_number']=1
+            try:
+                scanframeperiod,lineperiod = (imaging.MovieMetaData()&key).fetch1('movie_hroimanager_scanframeperiod','movie_hroimanager_lineperiod')
+                mean_image = (imaging.RegisteredMovieImage()&key).fetch1('registered_movie_mean_image')
+                roi_xpix,roi_ypix,roi_weights,roi_centroid_y = (imaging.ROI()*imaging_gt.ROISweepCorrespondance()&key).fetch1('roi_xpix','roi_ypix','roi_weights','roi_centroid_y')
+                mask = np.zeros_like(mean_image)
+                mask[roi_ypix,roi_xpix] = roi_weights/np.sum(roi_weights)
+                rois_overlaid += mask
+                mask_weight_on_slow_axis = np.sum(mask,1)
+                mask_cum_weight_on_slow_axis = np.cumsum(mask_weight_on_slow_axis)
+                
+                
+                roi_time =lineperiod*(np.argmax(mask_cum_weight_on_slow_axis>roi_percentiles[1])-np.argmax(mask_cum_weight_on_slow_axis>roi_percentiles[0]))
+                roi_times.append(roi_time)
+                roi_centroid_idxs.append(roi_centroid_y)
+                lineperiods.append(lineperiod)
+                roi_mask_on_slow_axis.append(mask_weight_on_slow_axis)
+                roi_mask_list.append(mask)
+                if sensor == '688' and type(mean_image_to_show)==list:#len(cells_already_got)==6:#:
+                    mean_image_to_show  = mean_image
+                    mask_to_show = mask
+                    mean_image_data_idx = len(roi_mask_list)-1
+            except:
+                pass
+        #break
+        cells_already_got.append(cell_id_now)
+
+#%
+
+fig_roi_distributions = plt.figure(figsize = [15,15])
+gs = gridspec.GridSpec(ncols=7, nrows=4, figure=fig_roi_distributions)
+ax_example_mean_image = fig_roi_distributions.add_subplot(gs[0,:-1])
+ax_axample_roi = fig_roi_distributions.add_subplot(gs[1,:-1])
+ax_example_roi_slow_axis = fig_roi_distributions.add_subplot(gs[1,-1])
+ax_example_roi_slow_axis.get_yaxis().set_visible(False)
+ax_example_roi_slow_axis = ax_example_roi_slow_axis.twinx()
+ax_rois_overlaid = fig_roi_distributions.add_subplot(gs[2,:-1])
+ax_rois_overlaid_slow_axis = fig_roi_distributions.add_subplot(gs[2,-1])
+ax_rois_overlaid_slow_axis.get_yaxis().set_visible(False)
+ax_rois_overlaid_slow_axis = ax_rois_overlaid_slow_axis.twinx()
+ax_roi_times = fig_roi_distributions.add_subplot(gs[3,:])
+for roi_time, roi_centroid_y,lineperiod,mask_weight_on_slow_axis in zip(roi_times,roi_centroid_idxs,lineperiods,roi_mask_on_slow_axis):
+    mask_cum_weight_on_slow_axis = np.cumsum(mask_weight_on_slow_axis)
+    ax_rois_overlaid_slow_axis.plot(mask_cum_weight_on_slow_axis,1000*lineperiod*np.arange(len(mask_cum_weight_on_slow_axis)),'k-',alpha = .1)
+    #ax_rois_overlaid_slow_axis.plot(mask_cum_weight_on_slow_axis[int(roi_centroid_y)],1000*lineperiod*roi_centroid_y/len(mask_cum_weight_on_slow_axis),'ro',alpha = .3)
+
+
+ax_rois_overlaid_slow_axis.invert_yaxis()    
+ax_rois_overlaid_slow_axis.set_ylim([1000*lineperiods[mean_image_data_idx]*len(mask_cum_weight_on_slow_axis),0])  
+mask_cum_weight_on_slow_axis = np.cumsum(roi_mask_on_slow_axis[mean_image_data_idx])
+ax_example_roi_slow_axis.plot(mask_cum_weight_on_slow_axis,1000*lineperiods[mean_image_data_idx]*np.arange(len(mask_cum_weight_on_slow_axis)),'k-')
+roi_idx_1 = np.argmax(mask_cum_weight_on_slow_axis>roi_percentiles[0])
+roi_idx_2 = np.argmax(mask_cum_weight_on_slow_axis>roi_percentiles[1])
+ax_example_roi_slow_axis.plot([0,1],[1000*lineperiods[mean_image_data_idx]*roi_idx_1]*2,'r--')
+ax_example_roi_slow_axis.plot([0,1],[1000*lineperiods[mean_image_data_idx]*roi_idx_2]*2,'r--')
+ax_example_roi_slow_axis.invert_yaxis()  
+ax_example_roi_slow_axis.set_ylim([1000*lineperiods[mean_image_data_idx]*len(mask_cum_weight_on_slow_axis),0])
+im_example_mean_image = ax_example_mean_image.imshow(mean_image_to_show,cmap = 'gray')
+im_roi = ax_axample_roi.imshow(mask_to_show)#,cmap = 'jet')
+ax_axample_roi.plot([0,mask_to_show.shape[1]],[roi_idx_1]*2,'r--')
+ax_axample_roi.plot([0,mask_to_show.shape[1]],[roi_idx_2]*2,'r--')
+ax_axample_roi.set_ylim([mask_to_show.shape[0],0])
+ax_axample_roi.set_xlim([0,mask_to_show.shape[1]])
+im_rois_overlaid = ax_rois_overlaid.imshow(rois_overlaid)#,cmap = 'jet')
+
+im_example_mean_image.set_clim(np.percentile(mean_image_to_show.flatten(),[1,99]))
+#im_roi.set_clim(np.percentile(mask_to_show.flatten(),[1,99]))
+im_rois_overlaid.set_clim(np.percentile(rois_overlaid.flatten(),[1,99]))
+ax_roi_times.hist(np.asarray(roi_times)*1000,np.arange(0,5,.2),color = 'red')
+ax_roi_times.set_xlim([0,5])
+filename = 'ROI_time_plot'
+figfile = os.path.join(figures_dir,filename+'.{}')
+fig_roi_distributions.savefig(figfile.format('svg'),dpi = 300)
 # =============================================================================
 # #%%
 # import scipy.stats as stats
