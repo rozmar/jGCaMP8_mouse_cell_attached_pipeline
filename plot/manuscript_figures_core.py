@@ -627,6 +627,12 @@ def plot_cell_wise_scatter_plots(ca_wave_parameters,ca_waves_dict,superresolutio
     #ax_half_decay_time_superres.set_title('Calculated from superresolution traces')
         #break
      #%     
+     
+    ax_amplitude.set_ylim([0,ax_amplitude.get_ylim()[1]])
+    ax_risetime.set_ylim([0,ax_risetime.get_ylim()[1]])
+    ax_half_decay_time.set_ylim([0,ax_half_decay_time.get_ylim()[1]])
+    ax_partial_risetime_superres.set_ylim([0,ax_partial_risetime_superres.get_ylim()[1]])
+    
     figfile = os.path.join(plot_parameters['figures_dir'],plot_parameters['plot_name']+'.{}')
     fig_scatter_plots_1ap.savefig(figfile.format('svg'))
     inkscape_cmd = ['/usr/bin/inkscape', '--file',figfile.format('svg'),'--export-emf', figfile.format('emf')]
