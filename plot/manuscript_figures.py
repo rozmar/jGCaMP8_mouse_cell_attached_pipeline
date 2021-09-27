@@ -13,11 +13,17 @@ import seaborn as sns
 import matplotlib
 
 import matplotlib.gridspec as gridspec
+boxplot_colors = {'456':'#0000ff',
+                  '686':'#ff0000',
+                  '688':'#666666',  
+                  'GCaMP7F':'#00ff00',
+                  'XCaMPgf':'#0099ff'}
 sensor_colors ={'GCaMP7F':'green',
-                'XCaMPgf':'orange',
+                'XCaMPgf':'#0099ff',#'orange',
                 '456':'blue',
                 '686':'red',
-                '688':'black'}
+                '688':'black',
+                'boxplot':boxplot_colors}
 font = {'family' : 'normal',
         'weight' : 'normal',
         'size'   : 13}
@@ -26,6 +32,16 @@ matplotlib.rc('font', **font)
 matplotlib.rcParams['font.family'] = 'sans-serif'
 matplotlib.rcParams['font.sans-serif'] = ['Tahoma']
 %matplotlib qt
+bad_cell_blacklist = ['anm472182_cell3',
+                      'anm479120_cell5',
+                      'anm479571_cell3',
+                      'anm479571_cell1',
+                      'anm478348_cell6',
+                      'anm478348_cell5',
+                      'anm478342_cell4',#low snr
+                      'anm478410_cell4',#low baseline f0
+                      'anm478347_cell4',
+                      'anm478406_cell3']
 # =============================================================================
 # #%%  gaussian
 # #figures_dir = '/home/rozmar/Data/shared_dir/'
@@ -42,6 +58,16 @@ matplotlib.rcParams['font.sans-serif'] = ['Tahoma']
 # subprocess.run(inkscape_cmd )
 # =============================================================================
 #%%
+# =============================================================================
+# fig = plt.figure()
+# ax_sd = fig.add_subplot(111)
+# sensors = ca_waves_dict_all.keys()
+# for sensor in sensors:
+#     for cell in ca_waves_dict_all[sensor]:
+#         ax_sd.plot(np.mean(cell['cawave_baseline_f']),np.mean(cell['cawave_baseline_f_std']),'o',color=sensor_colors[sensor],markersize = 5, alpha = 1)
+#     #break
+# =============================================================================
+
 #%%#######################################################################ALL RECORDING STATS - START################################################################################
 #################################################################################%%############################################################################################
 leave_out_putative_interneurons = False
@@ -294,12 +320,12 @@ import plot.imaging_gt_plot as imaging_plot
 imaging_plot.plot_number_of_rois(sensor_colors)
 #%%
 #%% stats for all experiments
-sensor_names = {'GCaMP7F': 'jGCaMP7f',
-                'XCaMPgf': 'XCaMPgf',
-                '456': 'jGCaMP8f',
+sensor_names = {'456': 'jGCaMP8f',
                 '686': 'jGCaMP8m',
-                '688': 'jGCaMP8s'}
-plot_properties = {'sensors':['GCaMP7F','XCaMPgf','456','686','688'],
+                '688': 'jGCaMP8s',
+                'GCaMP7F': 'jGCaMP7f',
+                'XCaMPgf': 'XCaMPgf'}
+plot_properties = {'sensors':['456','686','688','GCaMP7F','XCaMPgf'],
                    'sensor_colors':sensor_colors,
                    'max_expression_time':170,
                    'fig_name':'in_vivo_summary_stats',
@@ -314,7 +340,7 @@ inclusion_criteria = {'max_sweep_ap_hw_std_per_median':.2,
 manuscript_figures_core.plot_stats(plot_properties,inclusion_criteria)
 #%%ap parameters scatter plot, calcium sensor, median ap wave amplitude
 from plot import manuscript_figures_core
-plot_parameters = {'sensors':['GCaMP7F','XCaMPgf','456','686','688'],
+plot_parameters = {'sensors':['456','686','688','GCaMP7F','XCaMPgf'],
                    'sensor_colors':sensor_colors,
                    'ap_num_to_plot':1,
                    'x_parameter':'ap_peak_to_trough_time_median',#'cell_mean_firing_rate',#'ap_peak_to_trough_time_median' # not selected by AP number
@@ -773,6 +799,122 @@ ax_hw_amplitude_vc.cla()
 fig.savefig(figfile.format('svg'))
 inkscape_cmd = ['/usr/bin/inkscape', '--file',figfile.format('svg'),'--export-emf', figfile.format('emf')]
 subprocess.run(inkscape_cmd )
+#%%  burstiness
+isi_dict = {}
+cell_id = dict()
+for i,cell in enumerate(ephys_cell_attached.Cell()):
+    sensor,celltype = (imaging_gt.SessionCalciumSensor()*ephysanal_cell_attached.EphysCellType()&cell).fetch1('session_calcium_sensor','ephys_cell_type')
+    if celltype != 'pyr':
+        continue
+    if sensor not in isi_dict.keys():
+        isi_dict[sensor] = []
+        cell_id[sensor] = []
+    maxtimes,sweepstarttimes = (ephysanal_cell_attached.ActionPotential()*ephys_cell_attached.Sweep()&cell).fetch('ap_max_time','sweep_start_time')
+    maxtimes = np.asarray(maxtimes,float) + np.asarray(sweepstarttimes,float)
+    isis = np.diff(maxtimes)
+    isis  = isis[isis<10]
+    isi_cum,xscale = np.histogram(isis,np.arange(0,10,.001))
+    isi_cum = np.cumsum(isi_cum)/np.sum(isi_cum)
+    isi_dict[sensor].append(isi_cum)
+    xscale = xscale[:-1]+np.diff(xscale)[0]
+    cell_id[sensor].append('anm{}_cell{}'.format(cell['subject_id'],cell['cell_number']))
+    print(i)
+    #plt.plot(xscale,isi_cum)
+    #break
+
+#%%
+
+sensor_names = {'456': 'jGCaMP8f',
+            '686': 'jGCaMP8m',
+            '688': 'jGCaMP8s',
+            'GCaMP7F': 'jGCaMP7f',
+            'XCaMPgf': 'XCaMPgf'}
+xidx = np.argmax(xscale*1000>50)
+fig_isi = plt.figure()
+ax_all =  fig_isi.add_subplot(3,3,6)
+ax_all.set_xlabel('Inter-spike-interval (ms)')
+ax_all.set_ylabel('Cumulative probability')
+ax_comparison = fig_isi.add_subplot(3,3,7)
+cells_to_throw_out = dict()
+for i,sensor in enumerate(isi_dict.keys()):
+    if sensor == 'GCaMP7F' or sensor == 'XCaMPgf':
+        remove_num = 0
+    else:
+        remove_num = 20
+    vals = np.asarray(isi_dict[sensor])[:,xidx]
+    vals = vals[np.isnan(vals)==False]
+    max_val_needed = np.sort(vals)[remove_num]
+    needed = list()
+    ax_now =    fig_isi.add_subplot(3,3,i+1,sharex = ax_all,sharey = ax_all)
+    for isinow in isi_dict[sensor]:
+        if isinow[xidx]>=max_val_needed:
+            needed.append(True)
+            ax_now.plot(xscale*1000,isinow,color = sensor_colors[sensor],alpha = .1)
+        else:
+            needed.append(False)
+    needed = np.asarray(needed)            
+    cells_to_throw_out[sensor]=(np.asarray(cell_id[sensor])[needed==False]).tolist()
+    isi_mean = np.nanmean(np.asarray(isi_dict[sensor])[needed,:],0)
+    isi_std = np.nanstd(np.asarray(isi_dict[sensor])[needed,:],0)/np.sqrt(len(isi_dict[sensor]))
+    ax_now.plot(xscale*1000,isi_mean,color = sensor_colors[sensor])
+    ax_all.plot(xscale*1000,isi_mean,color = sensor_colors[sensor],label = sensor_names[sensor])
+    ax_all.fill_between(xscale*1000, isi_mean-isi_std,isi_mean+isi_std,color = sensor_colors[sensor],alpha = .2)
+    ax_all.legend()
+    ax_now.set_xlabel('Inter-spike-interval (ms)')
+    ax_now.set_ylabel('Cumulative probability')
+    
+    vals = np.asarray(isi_dict[sensor])[needed,xidx]
+    vals = vals[np.isnan(vals)==False]
+    burstyness_y,burstyness_x = np.histogram(vals,100)
+    burstyness_x = burstyness_x[:-1]+np.diff(burstyness_x)[0]
+    ax_comparison.plot(burstyness_x,np.cumsum(burstyness_y)/sum(burstyness_y),color = sensor_colors[sensor])
+    
+ax_all.set_xlim([0,250])
+json.dump(cells_to_throw_out, open(os.path.join(plot_parameters['figures_dir'],'cells_to_throw_out.json'), 'w'), sort_keys=True, indent='\t', separators=(',', ': '))
+    #break
+# bad recordings
+    
+    #%% sample traces
+import utils.utils_ephys as utils_ephys
+#% Putative pyramidal cells
+movie_length = 120 #s
+zoom_length = 15#2
+sweeps = {'456':[{'subject_id':478342,'session':1,'cell_number':4,'sweep_number':6,'start_time':0,'zoom_start_time':22.4}]
+          }
+# =============================================================================
+# # putative interneurons
+# movie_length = 80 #s
+# zoom_length = 10#2
+# sweeps = {'456':[{'subject_id':478407,'session':1,'cell_number':7,'sweep_number':4,'start_time':35,'zoom_start_time':44}],
+#           '686':[{'subject_id':472180,'session':1,'cell_number':1,'sweep_number':1,'start_time':50,'zoom_start_time':56}],#132
+#           '688':[{'subject_id':479119,'session':1,'cell_number':9,'sweep_number':2,'start_time':25,'zoom_start_time':69}]
+#           }
+# =============================================================================
+
+# =============================================================================
+# sweeps = {'456':[{'subject_id':471993,'session':1,'cell_number':2,'sweep_number':2,'start_time':20}],
+#           '686':[{'subject_id':479570,'session':1,'cell_number':1,'sweep_number':4,'start_time':31},
+#                  {'subject_id':479117,'session':1,'cell_number':8,'sweep_number':4,'start_time':110}],
+#           '688':[{'subject_id':472181,'session':1,'cell_number':3,'sweep_number':4,'start_time':80},
+#                  {'subject_id':472181,'session':1,'cell_number':1,'sweep_number':0,'start_time':37},
+#                  {'subject_id':472181,'session':1,'cell_number':1,'sweep_number':3,'start_time':16}]
+#           }
+# =============================================================================
+plot_parameters = {'gaussian_filter_sigma':5,
+                   'cawave_rneu' :.8,
+                   'rownum' : 4,
+                   'cax_limits' : [0,99],
+                   'alpha_roi':.3,
+                   'filename':'pyr',
+                   'figures_dir':figures_dir,
+                   'movie_length':movie_length,
+                   'zoom_length':zoom_length,
+                   'sweeps':sweeps,
+                   'sensor_colors':sensor_colors
+                   }
+
+manuscript_figures_core.plot_sample_traces(plot_parameters)
+
 #%%#######################################################################EPHYS PLOTS - END################################################################################
 #################################################################################%%############################################################################################
 
@@ -792,7 +934,7 @@ ca_wave_parameters = {'only_manually_labelled_movies':False,
                       'gaussian_filter_sigma':5,#0,5,10,20,50
                       'neuropil_subtraction':'0.8',#'none','0.7','calculated','0.8'
                       'neuropil_number':1,#0,1 # 0 is 2 pixel , 1 is 4 pixels left out around the cell
-                      'sensors': ['XCaMPgf','GCaMP7F','456','686','688'], # this determines the order of the sensors,#'XCaMPgf'
+                      'sensors': ['456','686','688','GCaMP7F','XCaMPgf'], # this determines the order of the sensors,#'XCaMPgf'
                       'ephys_recording_mode':'current clamp',
                       'minimum_f0_value':20, # when the neuropil is bright, the F0 can go negative after neuropil subtraction
                       'min_channel_offset':100 # PMT error
@@ -839,7 +981,7 @@ ca_waves_dict_pyr = utils_plot.collect_ca_wave_parameters(ca_wave_parameters,
 
 
 
-#%% download sensor kinetics
+#% download sensor kinetics
 wave_parameters = {'ap_num_to_plot':1,#ap_num_to_plot
                    'min_ap_per_apnum':1} # filters both grand average and cell-wise traces
 ca_traces_dict_1ap_pyr,ca_traces_dict_by_cell_1ap_pyr  = utils_plot.collect_ca_wave_traces( ca_wave_parameters,
@@ -847,7 +989,7 @@ ca_traces_dict_1ap_pyr,ca_traces_dict_by_cell_1ap_pyr  = utils_plot.collect_ca_w
                                                                                            wave_parameters)
 
 #%
-#%%
+#%
 from utils import utils_plot
 superres_parameters={'sensor_colors':sensor_colors,
                      'normalize_raw_trace_offset':True,#set to 0
@@ -920,6 +1062,7 @@ plot_parameters={'sensor_colors':sensor_colors,
                  }
 manuscript_figures_core.plot_superresolution_grand_averages(superresolution_traces_1ap_pyr_high_resolution,plot_parameters)
 #%% each cell separately
+
 superresolution_traces = superresolution_traces_1ap_pyr_low_resolution
 plot_parameters={'sensor_colors':sensor_colors,
                  'start_time':-50, # ms
@@ -928,7 +1071,8 @@ plot_parameters={'sensor_colors':sensor_colors,
                  'superresolution_function':'gauss',#'mean',#'median'#
                  'normalize_to_max':False,
                  'linewidth':2,
-                 'alpha':.5
+                 'alpha':.5,
+                 'blacklist':bad_cell_blacklist
                  }
 
 sensornum = len(ca_wave_parameters['sensors'])
@@ -942,7 +1086,10 @@ for sensor_i,sensor in enumerate(ca_wave_parameters['sensors']):
     color = plot_parameters['sensor_colors'][sensor]
     xs = superresolution_traces[sensor]['{}_time_per_cell'.format(plot_parameters['trace_to_use'])]
     ys = superresolution_traces[sensor]['{}_{}_per_cell'.format(plot_parameters['trace_to_use'],plot_parameters['superresolution_function'])]
-    for x,y in zip(xs,ys):
+    for x,y,ca_waves_dict_cell in zip(xs,ys,ca_waves_dict_pyr[sensor]):
+        sensor_cell_name = 'anm{}_cell{}'.format(ca_waves_dict_cell['cell_key']['subject_id'],ca_waves_dict_cell['cell_key']['cell_number'])
+        if sensor_cell_name in plot_parameters['blacklist']:
+            continue
         if plot_parameters['normalize_to_max']:
             y = y/np.max(y)
         ax_dict[sensor].plot(x,y,'-',color = color,linewidth = plot_parameters['linewidth'],alpha = plot_parameters['alpha'])
@@ -973,17 +1120,19 @@ subprocess.run(inkscape_cmd )
 wave_parameters = {'ap_num_to_plot':1,#ap_num_to_plot
                    'min_ap_per_apnum':10,
                    'trace_to_use':'dff',#'f','dff'
-                   'function_to_use':'median',#'median'#'mean'
-                   'superresolution_function':'mean',#'median',
+                   'function_to_use':'mean',#'median',#'median'#
+                   'superresolution_function':'mean',#'mean',##'median','gauss'
                    'max_rise_time':100,#ms
                    }
 plot_parameters={'sensor_colors':sensor_colors,
-                 'partial_risetime_target':.8,
+                 'partial_risetime_target':.5,
                  'figures_dir':figures_dir,
-                 'plot_name':'fig_amplitude_rise_time_scatter_pyr_1ap'}
+                 'plot_name':'fig_amplitude_rise_time_scatter_pyr_1ap',
+                 'blacklist':bad_cell_blacklist}
+#%
 manuscript_figures_core.plot_cell_wise_scatter_plots(ca_wave_parameters,
                                                      ca_waves_dict_pyr,
-                                                     superresolution_traces_1ap_pyr_low_resolution,
+                                                     superresolution_traces_1ap_pyr_low_resolution,#superresolution_traces_1ap_pyr_high_resolution,
                                                      wave_parameters,
                                                      plot_parameters)
 
@@ -1191,7 +1340,8 @@ plot_parameters = {'min_ap_per_apnum': 3,
                    'min_cell_num':1,
                    'min_event_num':10, # for bulk plot
                    'max_apnum':5,
-                   'sensor_colors':sensor_colors}
+                   'sensor_colors':sensor_colors,
+                   'blacklist':bad_cell_blacklist}
 fig_dff_ap_dependence = plt.figure(figsize = [10,10])
 ax_amplitude = fig_dff_ap_dependence.add_subplot(3,2,1)
 ax_amplitude_bulk = fig_dff_ap_dependence.add_subplot(3,2,2,sharex = ax_amplitude,sharey = ax_amplitude)
@@ -1214,6 +1364,11 @@ for sensor in ca_wave_parameters['sensors']:
         sensor_y_vals_bulk.append(list())
         sensor_y_vals_norm_bulk.append(list())
     for cell_data in cellwave_by_cell_list:
+        sensor_cell_name = 'anm{}_cell{}'.format(cell_data['cell_key']['subject_id'],cell_data['cell_key']['cell_number'])
+        if sensor_cell_name in plot_parameters['blacklist']:
+            #print('skipped')
+            continue
+        
         needed_apnum_idxes = cell_data['event_num_per_ap']>=plot_parameters['min_ap_per_apnum']
         apnums = cell_data['ap_group_ap_num_mean_per_ap'][needed_apnum_idxes]
         if 1 not in apnums:
