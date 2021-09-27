@@ -35,8 +35,10 @@ class SessionComment(dj.Imported):
 class VisualStimTrial(dj.Imported):
     definition = """
     -> Session
-    visual_stim_trial : smallint 		# trial number
+    visual_stim_trial                    : smallint 		# trial number
     ---
+    visual_stim_sweep                    : smallint         # sweep number
+    visual_stim_sweep_time               : float         # time since sweep start
     visual_stim_trial_start              : decimal(10, 4)  # (s) relative to session beginning 
     visual_stim_trial_end                : decimal(10, 4)  # (s) relative to session beginning 
     visual_stim_grating_start            : decimal(10, 4)  # (s) relative to session beginning 

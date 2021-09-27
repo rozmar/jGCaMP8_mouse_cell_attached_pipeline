@@ -31,6 +31,7 @@ def populatemytables_core_paralel(arguments,runround):
         imaging_gt.MovieDepth().populate(**arguments)
         
     elif runround == 2:
+        imaging_gt.LFPNeuropilCorrelation().populate(**arguments)
         imaging_gt.SessionROIFDistribution().populate(**arguments)
         imaging_gt.IngestCalciumWave().populate(**arguments)
         imaging_gt.IngestDoubletCalciumWave().populate(**arguments)
@@ -51,6 +52,7 @@ def populatemytables_core(arguments,runround):
         imaging_gt.MovieDepth().populate(**arguments)
         
     elif runround == 2:
+        imaging_gt.LFPNeuropilCorrelation().populate(**arguments)
         imaging_gt.SessionROIFDistribution().populate(**arguments)
         imaging_gt.IngestCalciumWave().populate(**arguments)
         imaging_gt.IngestDoubletCalciumWave().populate(**arguments)

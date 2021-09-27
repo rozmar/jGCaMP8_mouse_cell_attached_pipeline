@@ -58,6 +58,20 @@ def hpFilter(sig, HPfreq, order, sRate, padding = True):
         sig_out = signal.sosfilt(sos, sig)
     return sig_out
 
+def lpFilter(sig, LPfreq, order, sRate, padding = True):
+    """
+    High pass filter
+    -enable padding to avoid edge artefact
+    """
+    padlength=10000
+    sos = signal.butter(order, LPfreq, 'lp', fs=sRate, output='sos')
+    if padding: 
+        sig_out = signal.sosfilt(sos, np.concatenate([sig[padlength-1::-1],sig,sig[:-padlength-1:-1]]))
+        sig_out = sig_out[padlength:-padlength]
+    else:
+        sig_out = signal.sosfilt(sos, sig)
+    return sig_out
+
 def gaussFilter(sig,sRate,sigma = .00005):
     si = 1/sRate
     #sigma = .00005

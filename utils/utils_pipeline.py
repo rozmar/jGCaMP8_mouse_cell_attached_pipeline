@@ -6,11 +6,63 @@ import numpy as np
 from suite2p import default_ops as s2p_default_ops
 from suite2p import run_s2p
 from suite2p import classification
-from suite2p.detection.masks import create_neuropil_masks, create_cell_pix
+from suite2p.detection.masks import create_neuropil_masks, create_cell_pix, create_cell_mask
+from suite2p.extraction.extract import extract_traces
 import shutil
 import time
 import datetime
+from scipy.io import loadmat
 #%%
+
+def processVisMat(vis_mat_path):
+    #%%
+    """
+    processVisMat
+        load visual stim file and get relevant parameters
+    
+    @input:
+        vis_mat_path: path to vis stim mat file
+    
+    @outputs:
+        vis
+            ncondition: 8
+            ntrial: 5
+            fs: 122
+            stim_dur: 2
+            gray_dur: 2
+            total_frames: 19520
+            total_time: 160
+            stim_init: [1×40 double]
+            numStim: 40
+            angle: [1×40 double]
+            trials: {1×40 cell}
+    """
+    mat = loadmat(vis_mat_path)['vis'][0][0]
+    
+    vis = {}
+    vis['ncondition'] = mat[0][0][0]
+    vis['ntrial'] = mat[1][0][0]
+    vis['fs'] = mat[2][0][0]
+    vis['stim_dur'] = mat[3][0][0]
+    vis['gray_dur'] = mat[4][0][0]
+    vis['total_frames'] = mat[5][0][0]
+    vis['total_time'] = mat[6][0][0]
+    vis['stim_init'] = mat[7][0]
+    vis['numStim'] = mat[8][0][0]
+    vis['angle'] = mat[9][0]
+    vis['trials'] = mat[10]
+    vis['trials_list'] = dict()
+    keys = vis['trials'][0][0].dtype.fields.keys()
+    for key in keys:
+        vis['trials_list'][key]=list()
+        for trial in vis['trials'][0]:
+            vis['trials_list'][key].append(trial[key][0][0][0][0])
+            
+        
+        
+    #%
+    return vis
+
 def extract_scanimage_metadata(file):
     #%%
     image = ScanImageTiffReader(file)
@@ -172,9 +224,12 @@ def batch_run_suite2p(s2p_params):
     sessions = os.listdir(s2p_params['basedir'])
     sessions.sort()
     for session in sessions:
+        #%
+       # session = '2021-07-01-anm483859-interneurons'
         session_dir = os.path.join(s2p_params['basedir'],session)
         if not os.path.isdir(session_dir):
             continue
+
         files_dict = extract_files_from_dir(session_dir)
         for dir_now in files_dict['dirs']:
             if 'stack' not in dir_now and 'suite2p' not in dir_now:
@@ -227,11 +282,15 @@ def batch_run_suite2p(s2p_params):
                     
                     print('zoom: {}x, pixelsizes: {} micron, dims: {} pixel, FOV: {} microns, estimated XFOV: {}'.format(zoomfactor, pixelsize,movie_dims,FOV,XFOV))
                     ops['reg_tif'] = True # save registered movie as tif files
-                    ops['num_workers'] = 8
+                    #ops['num_workers'] = 8
                     ops['delete_bin'] = 0 
                     ops['keep_movie_raw'] = 0
                     ops['fs'] = float(metadata['frame_rate'])
-                    ops['nchannels'] = int(metadata['metadata']['hChannels']['channelsAvailable']) #TODO this is not good! doesn't recognize single channel movies
+                    #ops['nchannels'] = int(metadata['metadata']['hChannels']['channelsAvailable']) #TODO this is not good! doesn't recognize single channel movies
+                    if '[' in metadata['metadata']['hChannels']['channelSave']:
+                        ops['nchannels'] = 2
+                    else:
+                        ops['nchannels'] = 1
                     ops['save_path'] = save_dir_now
                     ops['fast_disk'] = save_dir_now
                     ops['diameter'] = np.ceil(s2p_params['cell_soma_size']/np.min(pixelsize))#pixelsize_real
@@ -270,6 +329,72 @@ def batch_run_suite2p(s2p_params):
                     os.rmdir(os.path.join(ops['data_path'][0],'suite2p'))
                     
 #%%
+                    
+                    
+                    
+                    
+                    
+#%%
+def suite2p_export_ROIs_with_overlap(s2p_params):
+    #%%
+    
+    sessions = os.listdir(s2p_params['basedir_out'])
+    sessions.sort()
+    for session in sessions:
+        session_dir = os.path.join(s2p_params['basedir_out'],session)
+        if not os.path.isdir(session_dir):
+            continue
+        
+        cells = os.listdir(session_dir)
+        for cell in cells:
+            cell_dir = os.path.join(session_dir,cell)
+            movies = os.listdir(cell_dir)
+            for movie in movies:
+                #t0 = time.time()
+                movie_dir = os.path.join(cell_dir,movie,'plane0')
+                #%
+                print('extracting roi from {}'.format(movie_dir))
+                try:
+                    iscell = np.load(os.path.join(movie_dir,'iscell.npy'))
+                    roi_stat = list(np.load(os.path.join(movie_dir,'stat.npy'),allow_pickle=True))
+                    reg_metadata = np.load(os.path.join(movie_dir,'ops.npy'),allow_pickle = True).tolist()
+                except:
+                    print('missing or corrupt suite2p files, skipping {}'.format(movie))
+                    continue
+                if reg_metadata['allow_overlap']:
+                    print('overlap is already enabled')
+                    continue
+                cell_masks = list()
+                for roi_stat_now in roi_stat:
+                    cell_mask = create_cell_mask(roi_stat_now,Ly=reg_metadata['Ly'], Lx=reg_metadata['Lx'], allow_overlap=True)
+                    #break
+                    cell_masks.append(cell_mask)
+                cell_pix = create_cell_pix(roi_stat, Ly=reg_metadata['Ly'], Lx=reg_metadata['Lx'], allow_overlap=reg_metadata['allow_overlap'])
+                neuropil_mask = create_neuropil_masks(ypixs=[stat['ypix'] for stat in roi_stat],
+                                                      xpixs=[stat['xpix'] for stat in roi_stat],
+                                                      cell_pix=cell_pix,
+                                                      inner_neuropil_radius=reg_metadata['inner_neuropil_radius'],
+                                                      min_neuropil_pixels=reg_metadata['min_neuropil_pixels'])
+                
+                reg_file  = os.path.join(movie_dir,'data.bin')
+                reg_metadata['allow_overlap'] = True
+                F,Fneu,ops = extract_traces(reg_metadata, cell_masks, neuropil_mask, reg_file)  
+                #%
+                np.save(os.path.join(movie_dir,'F_allow_orverlap.npy'),F,allow_pickle = True)
+                reg_file_chan2  = os.path.join(movie_dir,'data_chan2.bin')
+                F_chan2,Fneu_chan2,ops = extract_traces(reg_metadata, cell_masks, neuropil_mask, reg_file_chan2)    
+                np.save(os.path.join(movie_dir,'F_chan2_allow_orverlap.npy'),F_chan2,allow_pickle = True)
+# =============================================================================
+#                 break
+#             break
+#         break
+# =============================================================================
+    
+              
+ #%%                   
+                    
+                    
+                    
 def suite2p_extract_altered_neuropil(s2p_params,neuropil_pixel_nums = [4,8,16]):
     #%
     

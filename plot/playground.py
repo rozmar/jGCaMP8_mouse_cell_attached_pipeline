@@ -31,10 +31,275 @@ matplotlib.rcParams['font.sans-serif'] = ['Tahoma']
 # #%%
 # plt.plot(f0,std/f0,'ko',markersize = 1,alpha = .1)
 # =============================================================================
+#%% how does firing frequency change during a visual stim
+from scipy.stats import wilcoxon
+quality_key= {'max_sweep_ap_hw_std_per_median': .2,
+              'min_sweep_ap_snr_dv_median' : 10}
+ephys_snr_cond = 'sweep_ap_snr_dv_median>={}'.format(quality_key['min_sweep_ap_snr_dv_median'])
+ephys_hwstd_cond = 'sweep_ap_hw_std_per_median<={}'.format(quality_key['max_sweep_ap_hw_std_per_median'])
+i=0
+sensor_dict= dict()
+for cell in ephys_cell_attached.Cell():
+    print(cell)
+    sensor = (imaging_gt.SessionCalciumSensor()&cell).fetch1('session_calcium_sensor')
+    celltype = (ephysanal_cell_attached.EphysCellType()&cell).fetch1('ephys_cell_type')
+    session_time = (experiment.Session()&cell).fetch1('session_time')
+    cell_start_time = cell['cell_recording_start'].total_seconds() - session_time.total_seconds()
+    cell_end_time = cell_start_time+ float(np.max((ephys_cell_attached.Sweep()&cell).fetch('sweep_end_time')))
+    ap_max_time,sweep_start_time = (ephysanal_cell_attached.SweepAPQC()*ephys_cell_attached.Sweep()*ephysanal_cell_attached.ActionPotential()&cell&ephys_snr_cond&ephys_hwstd_cond).fetch('ap_max_time','sweep_start_time')
+    ap_max_time = np.asarray(ap_max_time,float)+np.asarray(sweep_start_time,float) +cell['cell_recording_start'].total_seconds() - session_time.total_seconds()
+    apgroups = ephys_cell_attached.Sweep()*ephysanal_cell_attached.SweepAPQC()*ephysanal_cell_attached.APGroup()*imaging_gt.CalciumWave.CalciumWaveProperties()*imaging_gt.ROISweepCorrespondance()&'channel_number = 1' & 'neuropil_number = 1'&'neuropil_subtraction = "0.8"'&'gaussian_filter_sigma = 10'&cell&ephys_snr_cond&ephys_hwstd_cond
+    if len(apgroups) == 0:
+        continue
+    ap_group_start_time,ap_group_ap_num,cawave_peak_amplitude_dff,sweep_start_time = apgroups.fetch('ap_group_start_time','ap_group_ap_num','cawave_peak_amplitude_dff','sweep_start_time')
+    ap_group_start_time = np.asarray(ap_group_start_time-sweep_start_time,float)#np.asarray(ap_group_start_time,float) +cell['cell_recording_start'].total_seconds()-session_time.total_seconds()
+    x = ap_group_start_time
+    y = cawave_peak_amplitude_dff/ap_group_ap_num
+    y = y/np.mean(y)
+    superres_dict = utils_plot.generate_superresolution_trace(x,y,2,10,function = 'all',dogaussian = False)
+
+    visualstim_trials = experiment.VisualStimTrial()&cell&'visual_stim_trial_start >= {}'.format(cell_start_time-10)&'visual_stim_trial_end <= {}'.format(cell_end_time+10)
+    angles = np.unique(visualstim_trials.fetch('visual_stim_grating_angle'))
+    cell_dict = dict()
+    cell_dict['angle'] = list()
+    cell_dict['sweep_time'] = list()
+    cell_dict['ctrl_freq'] = list()
+    cell_dict['gratings_freq'] = list()
+    cell_dict['diff_freq'] = list()
+    cell_dict['cawave_superres'] = superres_dict
+    
+    for visualstim_trial in visualstim_trials:
+        ctrl_ap = sum((ap_max_time>float(visualstim_trial['visual_stim_trial_start'])) & (ap_max_time<float(visualstim_trial['visual_stim_grating_start'])))/float(visualstim_trial['visual_stim_grating_start']-visualstim_trial['visual_stim_trial_start'])
+        gratings_ap = sum((ap_max_time>float(visualstim_trial['visual_stim_grating_start'])) & (ap_max_time<float(visualstim_trial['visual_stim_trial_end'])))/float(visualstim_trial['visual_stim_trial_end']-visualstim_trial['visual_stim_grating_start'])
+        cell_dict['angle'].append(visualstim_trial['visual_stim_grating_angle'])
+        cell_dict['sweep_time'].append(visualstim_trial['visual_stim_sweep_time'])
+        cell_dict['ctrl_freq'].append(ctrl_ap)
+        cell_dict['gratings_freq'].append(gratings_ap)
+        cell_dict['diff_freq'].append(gratings_ap-ctrl_ap)
+    #%
+    cell_dict['p_values']=np.ones(len(cell_dict['diff_freq']))
+    cell_dict['diff_freq_mean']=np.zeros(len(cell_dict['diff_freq']))
+    for key in cell_dict.keys():
+        cell_dict[key]=np.asarray(cell_dict[key])
+    for angle in np.unique(cell_dict['angle']):
+        idx = cell_dict['angle'] == angle
+        stat,p = wilcoxon(cell_dict['diff_freq'][idx])
+        cell_dict['p_values'][idx] = p
+        cell_dict['diff_freq_mean'][idx] = np.nanmean(cell_dict['diff_freq'][idx])
+    cell_dict['cell_key'] = cell
+    
+    if sensor not in sensor_dict.keys():
+        sensor_dict[sensor] = dict()
+    if celltype not in sensor_dict[sensor].keys():
+        sensor_dict[sensor][celltype] = list()
+    sensor_dict[sensor][celltype].append(cell_dict)
+    i+=1
+    if len(apgroups)>0:
+        break
+    
+#%% how AP num and calcium transient amplitudes change over a sweep.. they are stable..
+fig = plt.figure(figsize = [10,10]) 
+fig_img = plt.figure(figsize = [10,10])
+ax_dict = dict()
+ax_dict_im = dict()
+sensornum = len(sensor_dict.keys())
+i=0
+pvalue = .05
+firstax = None
+for x,sensor in enumerate(sensor_dict.keys()):
+    for y,celltype in enumerate(['pyr','int']):
+        i+=1
+        if firstax == None:
+            ax_dict['{}_{}'.format(sensor,celltype)] = fig.add_subplot(sensornum,2,i)
+            firstax  = ax_dict['{}_{}'.format(sensor,celltype)]
+            ax_dict_im['{}_{}'.format(sensor,celltype)] = fig_img.add_subplot(sensornum,2,i)
+            firstax_im  = ax_dict_im['{}_{}'.format(sensor,celltype)]
+        else:
+            ax_dict['{}_{}'.format(sensor,celltype)] = fig.add_subplot(sensornum,2,i,sharex = firstax,sharey = firstax)
+            ax_dict_im['{}_{}'.format(sensor,celltype)] = fig_img.add_subplot(sensornum,2,i,sharex = firstax_im,sharey = firstax_im)
+        ax_dict['{}_{}'.format(sensor,celltype)].set_title('{} - {}'.format(sensor,celltype))
+        ax_dict_im['{}_{}'.format(sensor,celltype)].set_title('{} - {}'.format(sensor,celltype))
+        
+
+for sensor in sensor_dict.keys():
+    for celltype in ['pyr','int']:
+        cell_dict_list = sensor_dict[sensor][celltype]
+        xs = list()
+        ys = list()
+        x_img_list = list()
+        y_img_list = list()
+        for cell_dict in cell_dict_list:
+            idx = cell_dict['p_values']<pvalue
+            x = cell_dict['sweep_time'][idx]
+            y = cell_dict['diff_freq'][idx]#cell_dict['diff_freq'][idx]/cell_dict['diff_freq_mean'][idx]
+            ax_dict['{}_{}'.format(sensor,celltype)].plot(x,y,'ko',ms = 4,alpha = .2)
+            xs.append(x)
+            ys.append(y)
+            x_img = np.asarray(cell_dict['cawave_superres'].tolist()['bin_centers'])
+            y_img = np.asarray(cell_dict['cawave_superres'].tolist()['trace_mean'])
+            x_img = np.concatenate([x_img,np.zeros(150)*np.nan])
+            y_img = np.concatenate([y_img,np.zeros(150)*np.nan])
+            
+            x_img_list.append(x_img[:150])
+            y_img_list.append(y_img[:150])
+            ax_dict_im['{}_{}'.format(sensor,celltype)].plot(x_img,y_img)
+        superres_dict = utils_plot.generate_superresolution_trace(np.concatenate(xs),np.concatenate(ys),2,10,function = 'all',dogaussian = False)
+        ax_dict['{}_{}'.format(sensor,celltype)].plot(superres_dict['bin_centers'],superres_dict['trace_mean'],'r-',linewidth = 4)
+        ax_dict_im['{}_{}'.format(sensor,celltype)].plot(np.nanmean(x_img_list,0),np.nanmean(y_img_list,0),'r-',linewidth = 4)
+        #break
+        #ax_dict['{}_{}'.format(sensor,celltype)].errorbar(superres_dict['bin_centers'],superres_dict['trace_mean'],superres_dict['trace_std'])
+# =============================================================================
+#         break
+#     break
+# =============================================================================
+    #break
+            
+    
+    
+
+
+
+
+#%%
+#even_keys = 
+for cell in ephys_cell_attached.Cell():
+    print(cell)
+    sensor = (imaging_gt.SessionCalciumSensor()&cell).fetch1('session_calcium_sensor')
+    celltype = (ephysanal_cell_attached.EphysCellType()&cell).fetch1('ephys_cell_type')
+    apgroups = ephys_cell_attached.Sweep()*ephysanal_cell_attached.SweepAPQC()*ephysanal_cell_attached.APGroup()*imaging_gt.CalciumWave.CalciumWaveProperties()*imaging_gt.ROISweepCorrespondance()&'channel_number = 1' & 'neuropil_number = 1'&'neuropil_subtraction = "0.8"'&'gaussian_filter_sigma = 10'&cell&ephys_snr_cond&ephys_hwstd_cond
+    apgroups = ephys_cell_attached.Sweep()*ephysanal_cell_attached.SweepAPQC()*ephysanal_cell_attached.APGroup()*imaging_gt.CalciumWave.CalciumWaveProperties()*imaging_gt.ROISweepCorrespondance()&'channel_number = 1' & 'neuropil_number = 1'&'neuropil_subtraction = "0.8"'&'gaussian_filter_sigma = 10'&cell&ephys_snr_cond&ephys_hwstd_cond
+    if len(apgroups) == 0:
+        continue
+    ap_group_start_time,ap_group_ap_num,cawave_peak_amplitude_dff,sweep_start_time = apgroups.fetch('ap_group_start_time','ap_group_ap_num','cawave_peak_amplitude_dff','sweep_start_time')
+    ap_group_start_time = np.asarray(ap_group_start_time-sweep_start_time,float)#np.asarray(ap_group_start_time,float) +cell['cell_recording_start'].total_seconds()-session_time.total_seconds()
+    x = ap_group_start_time
+    y = cawave_peak_amplitude_dff/ap_group_ap_num
+    y = y/np.mean(y)
+    superres_dict = utils_plot.generate_superresolution_trace(x,y,2,5,function = 'all',dogaussian = False)
+    
+    break
+#%% ROI weights are not consistent
+weights,sensors = (imaging_gt.SessionCalciumSensor()*imaging.ROI()).fetch('roi_weights','session_calcium_sensor')
+weights_sum = list()
+for weight in weights: weights_sum.append(np.sum(weight))
+#unique_sensors
+plt.hist(weights_sum)
+plt.hist(weights_sum,1000)
+plt.yscale('log')
+plt.ylabel('# of ROIs')
+plt.xlabel('sum of pixel weights')
+
+
+#%% neuropil vs LFP -  for Jerome at Allen
+import scipy
+import scaleogram as scg
+sweeps=ephys_cell_attached.Sweep()
+for i, sweep in enumerate(sweeps):
+    if i<395:#395
+        continue
+    sweep_now = ephys_cell_attached.Sweep()*ephys_cell_attached.SweepResponse()*ephys_cell_attached.SweepMetadata()&'recording_mode = "current clamp"'&sweep
+    if len(sweep_now )>0:
+        neuropil_key = {'motion_correction_method': 'Suite2P',
+                        'roi_type':'Suite2P',
+                        'neuropil_number':1,
+                        'channel_number':1}
+        sweep_start_time =  sweep_now.fetch1('sweep_start_time')
+        neuropil_f,frame_times  = (sweep_now*imaging_gt.ROISweepCorrespondance()*imaging.ROINeuropilTrace()*imaging.MovieFrameTimes()&neuropil_key).fetch1('neuropil_f','frame_times')
+        
+        print(i)
+        trace,sample_rate = sweep_now.fetch1('response_trace','sample_rate')
+        ap_max_index = (ephysanal_cell_attached.ActionPotential()*sweep_now).fetch('ap_max_index')
+        trace_no_ap = trace.copy()
+        step_back = int(sample_rate*.001)
+        step_forward = int(sample_rate*.01)
+        for ap_max_index_now in ap_max_index:
+            start_idx = np.max([0,ap_max_index_now-step_back])
+            end_idx = np.min([len(trace),ap_max_index_now+step_forward])
+            trace_no_ap[start_idx:end_idx] = trace[start_idx]
+        
+        cell_recording_start, session_time = (ephys_cell_attached.Cell()*experiment.Session()&sweep_now).fetch1('cell_recording_start', 'session_time')
+        ephys_time = np.arange(len(trace))/sample_rate
+        frame_times = frame_times - ((cell_recording_start-session_time).total_seconds()+float(sweep_start_time))
+        frame_rate = 1/np.diff(frame_times)[0]
+        trace_highpass = utils_ephys.hpFilter(trace_no_ap, .3, 3, sample_rate, padding = True)
+        trace_bandpass = utils_ephys.lpFilter(trace_highpass, 200, 3, sample_rate, padding = True)
+        trace_truncated = trace_highpass[int(sample_rate)*10:-int(sample_rate)*10]
+        percentiles = np.percentile(trace_truncated,[10,90])
+        trace_truncated = trace_truncated-percentiles[0]
+        trace_truncated = trace_truncated/(np.diff(percentiles))
+        out = scipy.signal.welch(trace_truncated, fs=sample_rate,nperseg = 5*sample_rate)
+        needed = (out[0]>.1) & (out[0]<50)
+        #%
+        downsample_factor = int(round(sample_rate / frame_rate))
+        trace_bandpass_downsampled = trace_bandpass[int(downsample_factor/2)::downsample_factor]
+        trace_bandpass_downsampled = trace_bandpass_downsampled[:len(neuropil_f)]
+        std_window = int(frame_rate*.5)
+        ephys_std = utils_ephys.rollingfun(trace_bandpass_downsampled, window = std_window, func = 'std')
+        xcorr = scipy.signal.correlate(scipy.stats.zscore(neuropil_f),scipy.stats.zscore(ephys_std), mode='full', method='direct')
+        xcorr_t = np.arange(len(xcorr))/frame_rate-len(frame_times)/frame_rate
+        #%
+        fig = plt.figure(figsize = [10,10])
+        ax_o = fig.add_subplot(511)
+        ax_e = fig.add_subplot(512,sharex = ax_o)
+        ax_e_std = fig.add_subplot(513,sharex = ax_o)
+        ax_fft = fig.add_subplot(515)
+        ax_xcorr = fig.add_subplot(514)
+        ax_o.plot(frame_times,scipy.stats.zscore(neuropil_f))
+        ax_e.plot(ephys_time,scipy.stats.zscore(trace_bandpass))
+        #ax_e.plot(frame_times,trace_bandpass_downsampled)
+        ax_fft.plot(out[0][needed],out[1][needed]*out[0][needed])
+        #ax_e.set_title(i)
+        ax_xcorr.plot(xcorr_t,xcorr)
+        ax_e_std.plot(frame_times,scipy.stats.zscore(ephys_std))
+        ax_o.set_ylabel('neuropil signal')
+        ax_e.set_ylabel('LFP')
+        
+        ax_e_std.set_ylabel('std filtered LFP')
+        ax_e_std.set_xlabel('time (s)')
+        ax_xcorr.set_ylabel('Xcorr')
+        ax_xcorr.set_xlabel('time (s)')
+        #%
+        break
+        
+        #%%
+        
+# =============================================================================
+#         ephys_std = utils_ephys.rollingfun(trace_bandpass, window = 10, func = 'std')
+#         
+#         #%%
+# sample_rate_psd = 500        
+# downsample_factor_psd = int(sample_rate/sample_rate_psd)
+# trace_to_psd = trace_bandpass[::downsample_factor_psd]
+# time_trace_to_psd = ephys_time[::downsample_factor_psd]
+# scg.set_default_wavelet('morl')
+# signal_length = len(trace_to_psd)
+# 
+# freqs = np.logspace(1,np.log10(300),50)
+# intervals = sample_rate_psd/freqs
+# #%
+# # choose default wavelet function 
+# 
+# 
+# 
+# # range of scales to perform the transform
+# scales = scg.periods2scales( intervals )
+# 
+# 
+# # plot the signal 
+# fig1, ax1 = plt.subplots(1, 1, figsize=(9, 3.5));  
+# ax1.plot(time_trace_to_psd, trace_to_psd, linewidth=3, color='blue')
+# 
+# # the scaleogram
+# out = scg.cws(trace_to_psd[:signal_length], scales=scales, figsize=(10, 4.0), coi = True, ylabel="Period", xlabel="Time",yaxis = 'frequency')
+#         
+# =============================================================================
+
+
+
 #%% model an image
 framenum = 100
-photon_per_dwelltime = .5
-pixel_intensity_per_photon = 500
+photon_per_dwelltime = 3
+pixel_intensity_per_photon = 5000
 pix_x = 512
 pix_y = 100
 linemask = [13, 12, 13, 12, 12, 12, 12, 11, 12, 11, 11, 11, 11, 11, 11, 10, 11,
@@ -132,7 +397,7 @@ for file in files:# = 'green_PMT_off_00002_00001.tif'
 #         if np.min(means)<0:
 #             means = means -np.min(means)
 # =============================================================================
-        variances = np.nanvar(movie,0)#*(linemask_altered[np.newaxis,:])
+        variances = np.nanvar(movie,0)*(np.asarray(linemask)[np.newaxis,:])
         
 # =============================================================================
 #         means = ndimage.filters.gaussian_filter(means,1)

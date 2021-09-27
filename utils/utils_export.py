@@ -9,17 +9,34 @@ import pandas as pd
 from pathlib import Path
 import json
 from utils import utils_plot, utils_ephys
+bad_cell_blacklist = ['anm472182_cell3',
+                      'anm479120_cell5',
+                      'anm479571_cell3',
+                      'anm479571_cell1',
+                      'anm478348_cell6',
+                      'anm478348_cell5',
+                      'anm478342_cell4',#low snr
+                      'anm478410_cell4',#low baseline f0
+                      'anm478347_cell4',
+                      'anm478406_cell3']
+bad_movie_blacklist = ['anm479572_cell4_movie15', #wrong ROI
+                       'anm479119_cell6_movie38',
+                       'anm478342_cell7_movie34']
 # =============================================================================
 # #%%
-# for downsampling_factor in [2,3,4,5,6]:
-#     downsample_movies_and_ROIs(downsampling_factor)
+# for downsampling_factor in [1,2,3,4,5,6,7,8]:
+#     downsample_movies_and_ROIs(downsampling_factor,overwrite = True,only_metadata = False)
 # =============================================================================
 #%% downsample movies and ROIs for 
-def downsample_movies_and_ROIs(downsampling_factor = 2):
+def downsample_movies_and_ROIs(downsampling_factor = 2,overwrite = False,only_metadata = False):
     #%%
-    #downsampling_factor = 2
-    overwrite = True
-    sensors_to_export = ['686','688','456','XCaMPgf','GCaMP7F']
+# =============================================================================
+#     downsampling_factor = 1
+#     overwrite = True
+#     only_metadata = False
+# =============================================================================
+    
+    sensors_to_export = ['456','686','688','XCaMPgf','GCaMP7F']#
     sensor_names = {'686':'jGCaMP8m',
                     '688':'jGCaMP8s',
                     '456':'jGCaMP8f',
@@ -102,7 +119,7 @@ def downsample_movies_and_ROIs(downsampling_factor = 2):
             subject_crit = 'subject_id = {}'.format(subject_id)
             cell_crit = 'cell_number = {}'.format(cell_number)
             celltype = (ephysanal_cell_attached.EphysCellType()& subject_crit & cell_crit).fetch1('ephys_cell_type')
-            
+            baseline_f0_value = (imaging_gt.CellBaselineFluorescence()& subject_crit & cell_crit).fetch1('cell_baseline_roi_f0_median')
             #%
             cell_movies = movies_all*imaging_gt.ROISweepCorrespondance() & subject_crit & cell_crit# &'sweep_number = 2'
             snrs,movie_numbers = cell_movies.fetch('movie_median_cawave_snr_per_ap','movie_number')
@@ -114,7 +131,8 @@ def downsample_movies_and_ROIs(downsampling_factor = 2):
                                   'putative_celltype':celltype,
                                   'total_ap_num':total_ap_num,
                                   'total_movie_lenght':total_movie_len,
-                                  'movie_number':len(movie_numbers)
+                                  'movie_number':len(movie_numbers),
+                                  'baseline_F0':baseline_f0_value
                                   }
             savedir_cell_movie = Path(os.path.join(savedir,'movies',sensor_names[sensor],'anm{}_cell_{}'.format(int(subject_id),int(cell_number))))
             savedir_cell_metadata = Path(os.path.join(savedir,'metadata',sensor_names[sensor],'anm{}_cell_{}'.format(int(subject_id),int(cell_number))))
@@ -142,9 +160,9 @@ def downsample_movies_and_ROIs(downsampling_factor = 2):
                         
                      #%
                     movie_crit = 'movie_number = {}'.format(movie_number)
-                    big_table = imaging.ROINeuropil()*imaging.Movie()*ephys_cell_attached.SweepMetadata()*imaging.ROI()*imaging.ROITrace()*imaging.ROINeuropilTrace()*imaging.MovieFrameTimes()*cell_movies&movie_crit&roi_crit#*ephysanal_cell_attached.ActionPotential()
+                    big_table = imaging.RegisteredMovieImage()*imaging.ROINeuropil()*imaging.Movie()*ephys_cell_attached.SweepMetadata()*imaging.ROI()*imaging.ROITrace()*imaging.ROINeuropilTrace()*imaging.MovieFrameTimes()*cell_movies&movie_crit&roi_crit#*ephysanal_cell_attached.ActionPotential()
                     #%
-                    roi_f,neuropil_f,roi_number,roi_centroid_x, roi_centroid_y, frame_times,roi_time_offset,movie_x_size,movie_y_size,movie_frame_num,movie_name,movie_pixel_size,roi_xpix,roi_ypix,roi_weights,neuropil_xpix,neuropil_ypix = big_table.fetch1('roi_f','neuropil_f','roi_number','roi_centroid_x','roi_centroid_y','frame_times','roi_time_offset','movie_x_size','movie_y_size','movie_frame_num','movie_name','movie_pixel_size','roi_xpix','roi_ypix','roi_weights','neuropil_xpix','neuropil_ypix') #ap_times
+                    roi_f,neuropil_f,roi_number,roi_centroid_x, roi_centroid_y, frame_times,roi_time_offset,movie_x_size,movie_y_size,movie_frame_num,movie_name,movie_pixel_size,roi_xpix,roi_ypix,roi_weights,neuropil_xpix,neuropil_ypix,registered_movie_mean_image = big_table.fetch1('roi_f','neuropil_f','roi_number','roi_centroid_x','roi_centroid_y','frame_times','roi_time_offset','movie_x_size','movie_y_size','movie_frame_num','movie_name','movie_pixel_size','roi_xpix','roi_ypix','roi_weights','neuropil_xpix','neuropil_ypix','registered_movie_mean_image') #ap_times
                     ap_max_times = (ephysanal_cell_attached.ActionPotential()*cell_movies&movie_crit&roi_crit).fetch('ap_max_time')
                     cell_recording_start, session_time = (ephys_cell_attached.Cell()*experiment.Session()*cell_movies&movie_crit).fetch1('cell_recording_start', 'session_time')
                     
@@ -166,23 +184,52 @@ def downsample_movies_and_ROIs(downsampling_factor = 2):
     #                 time.sleep()
     # =============================================================================
                     #%
-                    reg_file = open(os.path.join(source_dir,'data.bin'), 'rb')
+                    
                     Ly = int(movie_y_size)
                     Lx = int(movie_x_size)
                     downsampled_size_y = int(len(np.arange(0,Ly,downsampling_factor)))
                     downsampled_size_x = int(len(np.arange(0,Lx,downsampling_factor)))
-                    data_downsampled = np.zeros((int(movie_frame_num),downsampled_size_y, downsampled_size_x),np.int16)
-                    
+                    data_downsampled = np.zeros((int(movie_frame_num),downsampled_size_y, downsampled_size_x),np.float)
+                    #%
                     ROI_mask = np.zeros([Ly,Lx])
                     ROI_mask[roi_ypix,roi_xpix] = roi_weights/sum(roi_weights)
                     ROI_mask_down = ROI_mask[::downsampling_factor,::downsampling_factor]
                     ROI_mask_down = ROI_mask_down/sum(ROI_mask_down.flatten())
-                    
+    # =============================================================================
+    #                 #%%
+    #                 needed = ~metadata[3]['overlap']
+    #                 ROI_mask_nooverlap = np.zeros([Ly,Lx])
+    #                 ROI_mask_nooverlap[roi_ypix[needed],roi_xpix[needed]] = roi_weights[needed]/sum(roi_weights[needed])
+    #                 ROI_mask_down_nooverlap = ROI_mask_nooverlap[::downsampling_factor,::downsampling_factor]
+    #                 ROI_mask_down_nooverlap = ROI_mask_down_nooverlap/sum(ROI_mask_down_nooverlap.flatten())
+    # =============================================================================
+                    #%
                     neuropil_mask = np.zeros([Ly,Lx])
                     neuropil_mask[neuropil_ypix,neuropil_xpix] = 1/len(neuropil_xpix)
                     neuropil_mask_down = neuropil_mask[::downsampling_factor,::downsampling_factor]
                     neuropil_mask_down = neuropil_mask_down/sum(neuropil_mask_down.flatten())
                     
+                    
+                    movie_metadata_dict = {'ephys_sample_rate':int(sample_rate),
+                                           'movie_x_size':int(movie_x_size),
+                                           'movie_y_size':int(movie_y_size),
+                                           'movie_x_size_downsampled':int(downsampled_size_x),
+                                           'movie_y_size_downsampled':int(downsampled_size_y),
+                                           'movie_pixel_size':float(movie_pixel_size),
+                                           'movie_pixel_size_downsampled':float(movie_pixel_size*downsampling_factor),
+                                           'movie_frame_num':int(movie_frame_num),
+                                           'movie_name':movie_name,
+                                           'roi_time_offset':round(roi_time_offset,4),
+                                           'movie_1ap_snr':round(snr,1),
+                                           'downsampling_factor':downsampling_factor
+                                           }
+                    with open(savedir_cell_metadata/'movie_{}.json'.format(movie_number), 'w') as outfile:
+                        json.dump(movie_metadata_dict, outfile, indent=4)
+                    
+                    if only_metadata:
+                        continue
+                    
+                    reg_file = open(os.path.join(source_dir,'data.bin'), 'rb')
                     nimgbatch = 200
                     block_size = Ly*Lx*nimgbatch*2
                     ix = 0
@@ -208,32 +255,15 @@ def downsample_movies_and_ROIs(downsampling_factor = 2):
                     reg_file.close()
                     F_down = np.sum(data_downsampled*ROI_mask_down,(1,2))
                     Fneu_down = np.sum(data_downsampled*neuropil_mask_down,(1,2))
-                    #%
-                    
-                    #%
-                    
-                    #destination_dir = savedir_movie
-                        
-                    #%
-                    movie_metadata_dict = {'ephys_sample_rate':int(sample_rate),
-                                           'movie_x_size':int(movie_x_size),
-                                           'movie_y_size':int(movie_y_size),
-                                           'movie_x_size_downsampled':int(downsampled_size_x),
-                                           'movie_y_size_downsampled':int(downsampled_size_y),
-                                           'movie_pixel_size':float(movie_pixel_size),
-                                           'movie_pixel_size_downsampled':float(movie_pixel_size*downsampling_factor),
-                                           'movie_frame_num':int(movie_frame_num),
-                                           'movie_name':movie_name,
-                                           'roi_time_offset':round(roi_time_offset,4),
-                                           'movie_1ap_snr':round(snr,1),
-                                           'downsampling_factor':downsampling_factor
-                                           }
+    
                     
                     np.savez_compressed(os.path.join(savedir_cell_metadata,'movie_{}_roi_{}.npz'.format(movie_number,roi_number)),
                                         F_original=roi_f,
                                         Fneu_original = neuropil_f,
                                         ROI_mask_original = ROI_mask,
-                                        neuropil_mask_original = neuropil_mask,                                    
+                                        neuropil_mask_original = neuropil_mask, 
+                                        mean_image_original = registered_movie_mean_image,
+                                        mean_image_downsampled = np.mean(data_downsampled,0),
                                         F_downsampled=F_down,
                                         Fneu_downsampled = Fneu_down,
                                         ROI_mask_downsampled = ROI_mask_down,
@@ -243,10 +273,16 @@ def downsample_movies_and_ROIs(downsampling_factor = 2):
                                         frame_start_times = np.asarray(frame_times,float),
                                         roi_time_offset = roi_time_offset,                                    
                                         )
-                    
-                    with open(savedir_cell_metadata/'movie_{}.json'.format(movie_number), 'w') as outfile:
-                        json.dump(movie_metadata_dict, outfile, indent=4)
-                        #%
+                        
+                                            
+                                            
+                        
+                        
+# =============================================================================
+#                     print('break now')
+#                     time.sleep(1000)
+# =============================================================================
+                            #%
                 except:
                     print('error with this record')
                     cell_movies&movie_crit&roi_crit            
@@ -258,6 +294,8 @@ def downsample_movies_and_ROIs(downsampling_factor = 2):
 def export_movies_with_metadata():
     #%% export traces for s2f
     # this script locates the cells with highest snr for each sensor, then exports the first n cells or m movies, whichever comes first
+    lfp_neuropil_xcorr_max_threshold = 2500 #
+    overwrite = True
     sensors_to_export = ['686','688']
     sensor_names = {'686':'jGCaMP8m',
                     '688':'jGCaMP8s'}
@@ -355,6 +393,7 @@ def export_movies_with_metadata():
             #%
             savedir_cell_movie = Path(os.path.join(savedir,'movies',sensor_names[sensor],'anm{}_cell_{}'.format(int(subject_id),int(cell_number))))
             savedir_cell_metadata = Path(os.path.join(savedir,'metadata',sensor_names[sensor],'anm{}_cell_{}'.format(int(subject_id),int(cell_number))))
+            savedir_cell_ephys = Path(os.path.join(savedir,'ephys',sensor_names[sensor],'anm{}_cell_{}'.format(int(subject_id),int(cell_number))))
             savedir_cell_metadata.mkdir(parents=True, exist_ok=True)
             with open(savedir_cell_metadata/'cell_metadata.json', 'w') as outfile:
                 json.dump(cell_metadata_dict, outfile, indent=4)
@@ -368,14 +407,14 @@ def export_movies_with_metadata():
             #%
                 try:
                     metadata_filename = 'movie_{}.json'.format(int(movie_number))
-                    if metadata_filename in metadata_files_alread_saved:
+                    if metadata_filename in metadata_files_alread_saved and not overwrite:
                         print('{} already saved'.format(metadata_filename))
                         continue
                     else:
                         print('exporting to {}'.format(savedir_movie))
                         
                         
-                        
+                    
                         
                      #%
                     movie_crit = 'movie_number = {}'.format(movie_number)
@@ -419,6 +458,18 @@ def export_movies_with_metadata():
                     
                     with open(savedir_cell_metadata/'movie_{}.json'.format(movie_number), 'w') as outfile:
                         json.dump(movie_metadata_dict, outfile, indent=4)
+    # =============================================================================
+    #                 print('waiting')
+    #                 time.sleep(1000)    
+    # =============================================================================
+                    if len(imaging_gt.LFPNeuropilCorrelation()*cell_movies&movie_crit&roi_crit)>0:
+                        lfp_neuropil_xcorr_max = (imaging_gt.LFPNeuropilCorrelation()*cell_movies&movie_crit&roi_crit).fetch1('lfp_neuropil_xcorr_max')
+                        if lfp_neuropil_xcorr_max>=lfp_neuropil_xcorr_max_threshold:
+                            savedir_cell_ephys.mkdir(parents=True, exist_ok=True)
+                            response_trace = (ephys_cell_attached.SweepResponse()*cell_movies&movie_crit&roi_crit).fetch1('response_trace')
+                            np.save(os.path.join(savedir_cell_ephys,'movie_{}_ephys.npy'.format(movie_number)),response_trace)
+                            
+                        
                     #%
                 except:
                     print('error with this record')
@@ -429,7 +480,7 @@ def export_movies_with_metadata():
 
 
 
-def export_s2f_data_from_datajoint():
+def export_s2f_data_from_datajoint(): # for Ziquiang
     #%% export traces for s2f
     # this script locates the cells with highest snr for each sensor, then exports the first n cells or m movies, whichever comes first
     fig = plt.figure(figsize = [15,5])

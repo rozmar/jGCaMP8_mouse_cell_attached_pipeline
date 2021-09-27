@@ -421,4 +421,76 @@ for channel in ['RFP','DAPI','FITC']:
                     print('{} could not be saved'.format(filename))
                     time.sleep(1000)
                     #%%
-                    
+ #%% correlation between green and red channel
+from PIL import Image
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib import cm, colors
+import matplotlib.gridspec as gridspec
+min_green_intensity = 500
+fname_green = '/home/rozmar/Data/Anatomy/cropped_rotated/anm479116-UF688-20x/FITC/anm479116-UF688-20x_FITC_Z_000850.tiff'
+fname_red = '/home/rozmar/Data/Anatomy/cropped_rotated/anm479116-UF688-20x/RFP/anm479116-UF688-20x_RFP_Z_000850.tiff'
+fname_green = '/home/rozmar/Data/Anatomy/cropped_rotated/anm479116-UF688-20x/FITC/anm479116-UF688-20x_FITC_Z_000700.tiff'
+fname_red = '/home/rozmar/Data/Anatomy/cropped_rotated/anm479116-UF688-20x/RFP/anm479116-UF688-20x_RFP_Z_000700.tiff'
+# =============================================================================
+# fname_green = '/home/rozmar/Data/Anatomy/cropped_rotated/anm479410-UF456-20x/FITC/anm479410-UF456-20x_FITC_Z_001650.tiff'
+# fname_red = '/home/rozmar/Data/Anatomy/cropped_rotated/anm479410-UF456-20x/RFP/anm479410-UF456-20x_RFP_Z_001650.tiff'
+# 
+# fname_green = '/home/rozmar/Data/Anatomy/cropped_rotated/anm479569-UF686-20x/FITC/anm479569-UF686-20x_FITC_Z_001200.tiff'
+# fname_red = '/home/rozmar/Data/Anatomy/cropped_rotated/anm479569-UF686-20x/RFP/anm479569-UF686-20x_RFP_Z_001200.tiff'
+# =============================================================================
+
+im_green = Image.open(fname_green)
+imarray_green = np.array(im_green).flatten()
+im_red= Image.open(fname_red)
+imarray_red = np.array(im_red).flatten()
+needed = (imarray_red>000)&(imarray_green>min_green_intensity)
+#plt.plot(imarray_green,imarray_red,'ko',markersize = 1)
+fig = plt.figure()
+gs = gridspec.GridSpec(6, 10, figure=fig)
+ax_hist = fig.add_subplot(gs[:-1,1:-1])
+plt.axis('off')
+ax_hist.set_title('only pixels with green intensity > {}: {} % of the image'.format(min_green_intensity,round(len(imarray_green[needed])/len(needed)*10000)/100))
+ax_red = fig.add_subplot(gs[:-1,0],sharey = ax_hist)
+ax_red.set_ylabel('anti-GFP intensity')
+ax_green = fig.add_subplot(gs[-1,1:-1],sharex = ax_hist)
+ax_green_cumsum = ax_green.twinx()
+ax_green.set_xlabel('native GCaMP intensity')
+ax_cbar = fig.add_subplot(gs[:,-1])
+plt.axis('off')
+
+im = ax_hist.hist2d(imarray_green[needed],imarray_red[needed],500,norm=colors.LogNorm(), cmap='magma')
+cbar = fig.colorbar(im[3],ax=ax_cbar,fraction = 1)
+#ax_green.hist(imarray_green[needed],500)
+green_hist_values = np.histogram(imarray_green[needed],500)
+ax_green.bar(green_hist_values[1][:-1],green_hist_values[0],width = np.diff(green_hist_values[1])[0],color = 'green')
+ax_green.set_yscale('log')
+ax_green_cumsum.plot(green_hist_values[1][:-1],np.cumsum(green_hist_values[0])/np.sum(green_hist_values[0])*100,'k-',linewidth = 4)
+#ax_green_cumsum.set_yscale('log')
+red_hist_values = np.histogram(imarray_red[needed],500)
+ax_red.barh(red_hist_values[1][:-1],red_hist_values[0],np.diff(red_hist_values[1])[0],color = 'red')#,width = np.diff(red_hist_values[1])[0],left=
+ax_red.set_xscale('log')
+ax_red.set_xlim(ax_red.get_xlim()[::-1]) 
+#%
+ratio_im = np.array(im_red)/np.array(im_green)
+
+fig_image = plt.figure()
+ax_imgreen = fig_image.add_subplot(221)
+ax_imgreen.set_title('native GCaMP')
+ax_imred = fig_image.add_subplot(222,sharex = ax_imgreen,sharey = ax_imgreen)
+ax_imred.set_title('anti-GFP')
+ax_ratio = fig_image.add_subplot(223,sharex = ax_imgreen,sharey = ax_imgreen)
+ax_ratio.set_title('gain: anti-GFP/GCaMP')
+ax_gain = fig_image.add_subplot(224)
+ax_gain.set_xlabel('native GCaMP intensity')
+ax_gain.set_ylabel('gain')
+im_g = ax_imgreen.imshow(im_green,norm=colors.LogNorm(), cmap='magma')
+cbar = fig_image.colorbar(im_g,ax=ax_imgreen)
+
+im_r = ax_imred.imshow(im_red,norm=colors.LogNorm(), cmap='magma')
+cbar = fig_image.colorbar(im_r,ax=ax_imred)
+
+im_r = ax_ratio.imshow(ratio_im, norm=colors.LogNorm(),cmap='magma')#,
+cbar = fig_image.colorbar(im_r,ax=ax_ratio)
+needed = imarray_green>10
+ax_gain.hist2d(imarray_green[needed],ratio_im.flatten()[needed],500,norm=colors.LogNorm(), cmap='magma')
