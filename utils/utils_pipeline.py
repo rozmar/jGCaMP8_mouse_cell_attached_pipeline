@@ -11,7 +11,58 @@ from suite2p.extraction.extract import extract_traces
 import shutil
 import time
 import datetime
+from scipy.io import loadmat
 #%%
+
+def processVisMat(vis_mat_path):
+    #%%
+    """
+    processVisMat
+        load visual stim file and get relevant parameters
+    
+    @input:
+        vis_mat_path: path to vis stim mat file
+    
+    @outputs:
+        vis
+            ncondition: 8
+            ntrial: 5
+            fs: 122
+            stim_dur: 2
+            gray_dur: 2
+            total_frames: 19520
+            total_time: 160
+            stim_init: [1×40 double]
+            numStim: 40
+            angle: [1×40 double]
+            trials: {1×40 cell}
+    """
+    mat = loadmat(vis_mat_path)['vis'][0][0]
+    
+    vis = {}
+    vis['ncondition'] = mat[0][0][0]
+    vis['ntrial'] = mat[1][0][0]
+    vis['fs'] = mat[2][0][0]
+    vis['stim_dur'] = mat[3][0][0]
+    vis['gray_dur'] = mat[4][0][0]
+    vis['total_frames'] = mat[5][0][0]
+    vis['total_time'] = mat[6][0][0]
+    vis['stim_init'] = mat[7][0]
+    vis['numStim'] = mat[8][0][0]
+    vis['angle'] = mat[9][0]
+    vis['trials'] = mat[10]
+    vis['trials_list'] = dict()
+    keys = vis['trials'][0][0].dtype.fields.keys()
+    for key in keys:
+        vis['trials_list'][key]=list()
+        for trial in vis['trials'][0]:
+            vis['trials_list'][key].append(trial[key][0][0][0][0])
+            
+        
+        
+    #%
+    return vis
+
 def extract_scanimage_metadata(file):
     #%%
     image = ScanImageTiffReader(file)
@@ -173,9 +224,12 @@ def batch_run_suite2p(s2p_params):
     sessions = os.listdir(s2p_params['basedir'])
     sessions.sort()
     for session in sessions:
+        #%
+       # session = '2021-07-01-anm483859-interneurons'
         session_dir = os.path.join(s2p_params['basedir'],session)
         if not os.path.isdir(session_dir):
             continue
+
         files_dict = extract_files_from_dir(session_dir)
         for dir_now in files_dict['dirs']:
             if 'stack' not in dir_now and 'suite2p' not in dir_now:
@@ -228,11 +282,15 @@ def batch_run_suite2p(s2p_params):
                     
                     print('zoom: {}x, pixelsizes: {} micron, dims: {} pixel, FOV: {} microns, estimated XFOV: {}'.format(zoomfactor, pixelsize,movie_dims,FOV,XFOV))
                     ops['reg_tif'] = True # save registered movie as tif files
-                    ops['num_workers'] = 8
+                    #ops['num_workers'] = 8
                     ops['delete_bin'] = 0 
                     ops['keep_movie_raw'] = 0
                     ops['fs'] = float(metadata['frame_rate'])
-                    ops['nchannels'] = int(metadata['metadata']['hChannels']['channelsAvailable']) #TODO this is not good! doesn't recognize single channel movies
+                    #ops['nchannels'] = int(metadata['metadata']['hChannels']['channelsAvailable']) #TODO this is not good! doesn't recognize single channel movies
+                    if '[' in metadata['metadata']['hChannels']['channelSave']:
+                        ops['nchannels'] = 2
+                    else:
+                        ops['nchannels'] = 1
                     ops['save_path'] = save_dir_now
                     ops['fast_disk'] = save_dir_now
                     ops['diameter'] = np.ceil(s2p_params['cell_soma_size']/np.min(pixelsize))#pixelsize_real
