@@ -241,7 +241,10 @@ def plot_ap_scatter_with_third_parameter(ca_waves_dict,plot_parameters):
             try:
                 z = cell[plot_parameters['z_parameter']][idx]
             except:
-                z = cell[plot_parameters['z_parameter']][0]
+                try:
+                    z = cell[plot_parameters['z_parameter']][0]
+                except:
+                    z = cell[plot_parameters['z_parameter']]
             
             x_list.append(x)
             y_list.append(y)
@@ -263,7 +266,7 @@ def plot_ap_scatter_with_third_parameter(ca_waves_dict,plot_parameters):
     z_edges = np.percentile(z_list,plot_parameters['z_parameter_percentiles'])
     #print(z_edges)
     ms_edges = plot_parameters['markersize_edges']
-    fig_ephys_scatter = plt.figure(figsize = [10,5])
+    fig_ephys_scatter = plt.figure(figsize = [7.5,5])
     ax_ephys_scatter =     fig_ephys_scatter.add_subplot(1,1,1)
     for sensor in plot_parameters['sensors']:
         if plot_parameters['normalize z by sensor']:
@@ -300,6 +303,13 @@ def plot_ap_scatter_with_third_parameter(ca_waves_dict,plot_parameters):
         ax_ephys_scatter.set_xlabel(plot_parameters['xlabel'])
     if 'ylabel' in plot_parameters.keys():
         ax_ephys_scatter.set_ylabel(plot_parameters['ylabel'])
+    for i,highlight_key in enumerate(plot_parameters['highlight_key_list']):
+        x,y = (ephysanal_cell_attached.CellSpikeParameters()&'recording_mode = "current clamp"'&highlight_key).fetch1(plot_parameters['x_parameter'],plot_parameters['y_parameter'])
+        if plot_parameters['invert y axis']:
+            y = 1/y
+        ax_ephys_scatter.text(x,y,'*',horizontalalignment='center',verticalalignment='center', fontsize=18)
+        
+        
     figfile = os.path.join(plot_parameters['figures_dir'],plot_parameters['fig_name']+'.{}')
     fig_ephys_scatter.savefig(figfile.format('svg'))
     inkscape_cmd = ['/usr/bin/inkscape', '--file',figfile.format('svg'),'--export-emf', figfile.format('emf')]
@@ -737,8 +747,10 @@ def plot_sample_traces(plot_parameters):
         for sweep in sweeps_now:
             start_time = sweep.pop('start_time',None)
             zoom_start_time = sweep.pop('zoom_start_time',None)
-            
-            mean_image,movie_x_size,movie_y_size,movie_pixel_size,roi_xpix,roi_ypix = (imaging.ROI()*imaging.Movie()*imaging_gt.ROISweepCorrespondance()*imaging.RegisteredMovieImage()&sweep&'channel_number = 1').fetch1('registered_movie_mean_image','movie_x_size','movie_y_size','movie_pixel_size','roi_xpix','roi_ypix')
+            try:
+                mean_image,movie_x_size,movie_y_size,movie_pixel_size,roi_xpix,roi_ypix = (imaging.ROI()*imaging.Movie()*imaging_gt.ROISweepCorrespondance()*imaging.RegisteredMovieImage()&sweep&'channel_number = 1').fetch1('registered_movie_mean_image','movie_x_size','movie_y_size','movie_pixel_size','roi_xpix','roi_ypix')
+            except:
+                continue
             movie_pixel_size = float(movie_pixel_size)
             mean_image_red = (imaging_gt.ROISweepCorrespondance()*imaging.RegisteredMovieImage()&sweep&'channel_number = 2').fetch1('registered_movie_mean_image')
             axs_meanimages.append(fig_meanimages.add_subplot(plot_parameters['rownum'],2,len(axs_meanimages)+1))

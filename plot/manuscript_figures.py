@@ -84,7 +84,7 @@ ca_wave_parameters = {'only_manually_labelled_movies':False,
                       'neuropil_subtraction':'0.8',#'none','0.7','calculated','0.8'
                       'neuropil_number':1,#0,1 # 0 is 2 pixel , 1 is 4 pixels left out around the cell
                       'sensors': ['XCaMPgf','GCaMP7F','456','686','688'], # this determines the order of the sensors,#'XCaMPgf'
-                      'ephys_recording_mode':'current clamp',
+                      'ephys_recording_mode':'current clamp',#'voltage clamp',#
                       'minimum_f0_value':20, # when the neuropil is bright, the F0 can go negative after neuropil subtraction
                       'min_channel_offset':100 # PMT error
                       }
@@ -339,6 +339,28 @@ inclusion_criteria = {'max_sweep_ap_hw_std_per_median':.2,
 #%
 manuscript_figures_core.plot_stats(plot_properties,inclusion_criteria)
 #%%ap parameters scatter plot, calcium sensor, median ap wave amplitude
+example_list = []
+fig = plt.figure(figsize = [2.5,5])
+ax_example_ap = fig.add_subplot(111)
+for celltype in ['int','pyr']:
+    ap_peak_to_trough_time_median,ap_ahp_amplitude_median,subject_id,session,cell_number = (ephysanal_cell_attached.EphysCellType()*ephysanal_cell_attached.CellSpikeParameters()&'ephys_cell_type = "{}"'.format(celltype)&'recording_mode = "current clamp"').fetch('ap_peak_to_trough_time_median','ap_ahp_amplitude_median','subject_id','session','cell_number')
+    ap_ahp_amplitude_median[ap_ahp_amplitude_median<.1] = .1
+    ap_peak_to_trough_time_median[ap_peak_to_trough_time_median>1.5] = 1.5
+    median_idx = np.argmin(np.abs(scipy.stats.zscore(ap_peak_to_trough_time_median))+np.abs(scipy.stats.zscore(ap_ahp_amplitude_median)))
+    example_key = {'subject_id':subject_id[median_idx],
+                   'session':session[median_idx],
+                   'cell_number':cell_number[median_idx],
+                   }
+    example_list.append(example_key)
+
+for example_key in example_list:
+    y,x = (ephysanal_cell_attached.CellSpikeParameters()&example_key&'recording_mode = "current clamp"').fetch1('average_ap_wave','average_ap_wave_time')
+    sensor_now = (imaging_gt.SessionCalciumSensor()&example_key).fetch1('session_calcium_sensor')
+    ax_example_ap.plot(x,y,color = sensor_colors[sensor_now],label = example_key,linewidth = 4)
+figfile = os.path.join(figures_dir,'AP_parameters_interneuron_selection_cc_example_spikes.{}')
+fig.savefig(figfile.format('svg'))
+#plt.legend()
+#%
 from plot import manuscript_figures_core
 plot_parameters = {'sensors':['456','686','688','GCaMP7F','XCaMPgf'],
                    'sensor_colors':sensor_colors,
@@ -353,13 +375,15 @@ plot_parameters = {'sensors':['456','686','688','GCaMP7F','XCaMPgf'],
                    'z_parameter_percentiles':[5,95],
                    'normalize z by sensor':False,
                    'xlim':[0.2,2.5],
-                   'fig_name':'AP_parameters_interneuron_selection',
+                   'fig_name':'AP_parameters_interneuron_selection_cc',
                    'figures_dir':figures_dir,
                    'xlabel':'Peak to trough time (ms)',
-                   'ylabel':'Peak to trough ratio'}#'cawave_peak_amplitude_dff_median_per_ap'
-manuscript_figures_core.plot_ap_scatter_with_third_parameter(ca_waves_dict,plot_parameters)
+                   'ylabel':'Peak to trough ratio',
+                   'highlight_key_list':example_list}#'cawave_peak_amplitude_dff_median_per_ap'
+manuscript_figures_core.plot_ap_scatter_with_third_parameter(ca_waves_dict_all,plot_parameters)
 
 #%%
+
 #%% figure explaining superresolution analysis
 
 
@@ -1139,7 +1163,10 @@ manuscript_figures_core.plot_cell_wise_scatter_plots(ca_wave_parameters,
 
 #%%#######################################################################Spike doublets - START################################################################################
 #################################################################################%%############################################################################################
+###############run pyramidal cells grand averages before these ###################
+
 #%% download sensor kinetics for 2 AP - doublets
+
 wave_parameters = {'ap_num_to_plot':2,#ap_num_to_plot
                    'min_ap_per_apnum':1} # filters both grand average and cell-wise traces
 ca_wave_parameters['min_pre_isi']=.2
@@ -1982,6 +2009,11 @@ sweeps = {'456':[{'subject_id':478407,'session':1,'cell_number':7,'sweep_number'
           '686':[{'subject_id':472180,'session':1,'cell_number':1,'sweep_number':1,'start_time':50,'zoom_start_time':56}],#132
           '688':[{'subject_id':479119,'session':1,'cell_number':9,'sweep_number':2,'start_time':25,'zoom_start_time':69}]
           }
+sweeps = {'456':[{'subject_id':478407,'session':1,'cell_number':7,'sweep_number':4,'start_time':35,'zoom_start_time':44}],
+          '686':[{'subject_id':472180,'session':1,'cell_number':1,'sweep_number':1,'start_time':50,'zoom_start_time':56}],#132
+          '688':[{'subject_id':479571,'session':1,'cell_number':3,'sweep_number':0,'start_time':25,'zoom_start_time':69},
+                 {'subject_id':479571,'session':1,'cell_number':3,'sweep_number':1,'start_time':25,'zoom_start_time':69}]
+          }
 
 plot_parameters = {'gaussian_filter_sigma':5,
                    'cawave_rneu' : .8,
@@ -1997,6 +2029,159 @@ plot_parameters = {'gaussian_filter_sigma':5,
                    }
 
 manuscript_figures_core.plot_sample_traces(plot_parameters)
+
+#%% get dynamic range of interneurons
+from matplotlib.lines import Line2D
+font = {'family' : 'normal',
+        'weight' : 'normal',
+        'size'   : 16}
+
+matplotlib.rc('font', **font)
+matplotlib.rcParams['font.family'] = 'sans-serif'
+matplotlib.rcParams['font.sans-serif'] = ['Tahoma']
+sweepvise = True
+dff_percentile = 99
+sensors = ['XCaMPgf','GCaMP7F','456','686','688']
+celltypes = {'pyr':{'marker':'^', 'alpha':.5,'linestyle':'-'},
+             'int':{'marker':'o','alpha':.5,'linestyle':'-.'}}
+fig = plt.figure(figsize = [15,15])
+ax_dynamic_f0 = fig.add_subplot(1,1,1)
+fig2 = plt.figure(figsize = [15,15])
+ax_frdep = fig2.add_subplot(1,1,1)
+fig3 = plt.figure(figsize = [15,15])
+ax_fr_f0_dep = fig3.add_subplot(1,1,1)
+
+fig4 = plt.figure(figsize = [15,15])
+ax_regression_1 = fig4.add_subplot(1,1,1)
+ax_regression_2 = ax_regression_1.twinx()
+ms_range = [4,40]
+#fr_range = [1,20]
+fr_time_window = '1s'
+firing_rate_name = 'cell_max_firing_rate_{}'.format(fr_time_window)
+fr_dist = ephysanal_cell_attached.CellMaxFiringRate().fetch(firing_rate_name)
+fr_range = np.percentile(fr_dist,[1,99])
+dff_range = [.25, 5]
+for sensor in sensors:
+    for celltype in celltypes.keys():
+# =============================================================================
+#         try:
+#             needed = (np.isnan(f0)==False) & (np.isnan(dff)==False)
+#             x = np.asarray([scipy.stats.zscore(f0[needed]),scipy.stats.zscore(mean_firing_rate[needed])]).T
+#             y= scipy.stats.zscore(dff[needed])
+#             model = LinearRegression().fit(x, y)
+#             if model.score(x,y)>-.5:
+#                 ax_regression_1.plot(0, model.coef_[0],celltypes[celltype]['marker'],color = sensor_colors[sensor],markersize = 10)
+#                 ax_regression_2.plot(1, model.coef_[1],celltypes[celltype]['marker'],color = sensor_colors[sensor],markersize = 10)
+#                 #print(model.score(x,y))
+#         except:
+#             pass
+# =============================================================================
+        if sweepvise:
+            data = imaging_gt.CellBaselineFluorescence()*ephysanal_cell_attached.SweepMaxFiringRate()*ephysanal_cell_attached.SweepMinFiringRate()*imaging_gt.CellMovieDynamicRange()*ephysanal_cell_attached.EphysCellType()*imaging_gt.SessionCalciumSensor()&'session_calcium_sensor = "{}"'.format(sensor)&'ephys_cell_type = "{}"'.format(celltype)
+            f0,dff,mean_firing_rate,min_firing_rate = data.fetch('cell_baseline_roi_f0_median','movie_dff_percentile_{}'.format(dff_percentile),firing_rate_name,firing_rate_name[:5] + 'min'+firing_rate_name[8:])
+            #mean_firing_rate = mean_firing_rate-min_firing_rate
+        else:
+            data = imaging_gt.CellBaselineFluorescence()*ephysanal_cell_attached.CellMaxFiringRate()*imaging_gt.CellDynamicRange()*ephysanal_cell_attached.EphysCellType()*imaging_gt.SessionCalciumSensor()&'session_calcium_sensor = "{}"'.format(sensor)&'ephys_cell_type = "{}"'.format(celltype)
+            f0,dff,mean_firing_rate = data.fetch('cell_baseline_roi_f0_median','cell_dff_percentile_{}'.format(dff_percentile),firing_rate_name)
+        for f0_now,dff_now,fr_now in zip(f0,dff,mean_firing_rate):
+            ms = (fr_now-fr_range[0])/np.diff(fr_range)[0]
+            ms = np.max([ms,0])
+            ms = np.min([ms,1])
+            ms = ms*np.diff(ms_range)[0]+ms_range[0]
+            ax_dynamic_f0.plot(f0_now,dff_now,celltypes[celltype]['marker'],color = sensor_colors[sensor],alpha = celltypes[celltype]['alpha'], markersize = ms)
+            if f0_now<40000 and f0_now>-20:
+                alpha = 1
+            else:
+                alpha = 1
+            ax_frdep.plot(fr_now,dff_now,celltypes[celltype]['marker'],color = sensor_colors[sensor],alpha = .5, markersize = 15)
+            
+            ms = (dff_now-dff_range[0])/np.diff(dff_range)[0]
+            ms = np.max([ms,0])
+            ms = np.min([ms,1])
+            ms = ms*np.diff(ms_range)[0]+ms_range[0]
+            ax_fr_f0_dep.plot(f0_now,fr_now,celltypes[celltype]['marker'],color = sensor_colors[sensor],alpha = celltypes[celltype]['alpha'], markersize = ms)
+            
+        try:   
+            needed = (np.isnan(f0)==False) & (np.isnan(dff)==False)
+            p=np.polyfit(f0[needed],dff[needed],1)
+            x = np.arange(np.nanmin(f0),np.nanmax(f0),np.diff([np.nanmin(f0)-1,np.nanmax(f0)+1])/100)
+            y = np.polyval(p,x)
+            ax_dynamic_f0.plot(x,y,celltypes[celltype]['linestyle'],color = sensor_colors[sensor],alpha = .5,linewidth=8)
+        except:
+            pass
+        
+        try:
+            #needed = (dff<np.max(dff)) &(dff>np.min(dff))&(mean_firing_rate<np.max(mean_firing_rate)) &(mean_firing_rate>np.min(mean_firing_rate))
+            p=np.polyfit(mean_firing_rate,dff,1)
+            x = np.arange(np.min(mean_firing_rate),np.max(mean_firing_rate),np.diff([np.min(mean_firing_rate)-1,np.max(mean_firing_rate)+1])/100)
+            y = np.polyval(p,x)
+            ax_frdep.plot(x,y,celltypes[celltype]['linestyle'],color = sensor_colors[sensor],alpha = .5,linewidth=8)
+        except:
+            pass
+        
+        #break
+#ax_dynamic_f0.set_yscale('log')    
+ax_dynamic_f0.set_xscale('log')  
+ax_dynamic_f0.set_xlabel('power corrected F0 (pixel intensity)')  
+ax_dynamic_f0.set_ylabel('dynamic range (dF/F)')
+legend_elements = list()  
+for sensor in sensors:
+    legend_elements.append(Line2D([0], [0], marker='o', color='white',#plot_parameters['sensor_colors'][sensor], 
+                                  label=sensor,markerfacecolor=sensor_colors[sensor], markersize=12))
+legend_elements.append(Line2D([0], [0], marker='o', color = 'white',
+                                  label='{} Hz max FR'.format(int(fr_range[0])),markerfacecolor='black', markersize=ms_range[0], alpha = .5))
+legend_elements.append(Line2D([0], [0], marker='o',color = 'white',
+                                  label='{} Hz max FR'.format(int(fr_range[1])),markerfacecolor='black', markersize=ms_range[1], alpha = .5))
+legend_elements.append(Line2D([0], [0],marker='o', color='white',#plot_parameters['sensor_colors'][sensor], 
+                                  label='int',markerfacecolor='black', markersize=12))
+legend_elements.append(Line2D([0], [0],marker='^', color='white',#plot_parameters['sensor_colors'][sensor], 
+                                  label='pyr',markerfacecolor='black', markersize=12))
+ax_dynamic_f0.legend(handles=legend_elements)  
+
+ax_frdep.set_xlabel('max firing rate in {} window (Hz)'.format(fr_time_window))
+ax_frdep.set_ylabel('Dynamic range (dF/F)')
+legend_elements = list()  
+for sensor in sensors:
+    legend_elements.append(Line2D([0], [0], marker='o', color='white',#plot_parameters['sensor_colors'][sensor], 
+                                  label=sensor,markerfacecolor=sensor_colors[sensor], markersize=12))
+legend_elements.append(Line2D([0], [0], ls = '--', marker='o', color='black',#plot_parameters['sensor_colors'][sensor], 
+                                  label='int',markerfacecolor='black', markersize=12))
+legend_elements.append(Line2D([0], [0], ls = '-',marker='^', color='black',#plot_parameters['sensor_colors'][sensor], 
+                                  label='pyr',markerfacecolor='black', markersize=12))
+ax_frdep.legend(handles=legend_elements) 
+ax_frdep.set_yscale('log')    
+ax_frdep.set_xscale('log')
+
+ax_fr_f0_dep.set_ylabel('max firing rate in {} window (Hz)'.format(fr_time_window))
+ax_fr_f0_dep.set_xlabel('power corrected F0 (pixel intensity)')
+legend_elements = list()  
+for sensor in sensors:
+    legend_elements.append(Line2D([0], [0], marker='o', color='white',#plot_parameters['sensor_colors'][sensor], 
+                                  label=sensor,markerfacecolor=sensor_colors[sensor], markersize=12))
+legend_elements.append(Line2D([0], [0], marker='o', color = 'white',
+                                  label='{} dF/F dynamic range'.format(int(dff_range[0]*10)/10),markerfacecolor='black', markersize=ms_range[0], alpha = .5))
+legend_elements.append(Line2D([0], [0], marker='o',color = 'white',
+                                  label='{} dF/F dynamic range'.format(int(dff_range[1]*10)/10),markerfacecolor='black', markersize=ms_range[1], alpha = .5))
+legend_elements.append(Line2D([0], [0],marker='o', color='white',#plot_parameters['sensor_colors'][sensor], 
+                                  label='int',markerfacecolor='black', markersize=12))
+legend_elements.append(Line2D([0], [0],marker='^', color='white',#plot_parameters['sensor_colors'][sensor], 
+                                  label='pyr',markerfacecolor='black', markersize=12))
+ax_fr_f0_dep.legend(handles=legend_elements)  
+
+ax_fr_f0_dep.set_yscale('log')    
+ax_fr_f0_dep.set_xscale('log')
+
+#break
+
+ #%%
+from sklearn.linear_model import LinearRegression
+
+
+
+
+
+
+
 
 #%%#######################################################################INTERNEURONS - END################################################################################
 #################################################################################%%############################################################################################
@@ -2077,7 +2262,13 @@ plot_parameters={'sensor_colors':sensor_colors,
 #%
 imaging_plot.scatter_plot_all_event_properties(ca_waves_dict_pyr,ca_wave_parameters,plot_parameters)
 
-
+# # putative interneurons
+# movie_length = 80 #s
+# zoom_length = 10#2
+# sweeps = {'456':[{'subject_id':478407,'session':1,'cell_number':7,'sweep_number':4,'start_time':35,'zoom_start_time':44}],
+#           '686':[{'subject_id':472180,'session':1,'cell_number':1,'sweep_number':1,'start_time':50,'zoom_start_time':56}],#132
+#           '688':[{'subject_id':479119,'session':1,'cell_number':9,'sweep_number':2,'start_time':25,'zoom_start_time':69}]
+#           }
 #%% sample traces
 import utils.utils_ephys as utils_ephys
 #% Putative pyramidal cells
@@ -2089,31 +2280,28 @@ sweeps = {'456':[{'subject_id':471993,'session':1,'cell_number':2,'sweep_number'
           '688':[{'subject_id':472181,'session':1,'cell_number':1,'sweep_number':3,'start_time':16,'zoom_start_time':22.4},
                  {'subject_id':472181,'session':1,'cell_number':7,'sweep_number':3,'start_time':57,'zoom_start_time':94.25}]
           }
-# =============================================================================
-# # putative interneurons
-# movie_length = 80 #s
-# zoom_length = 10#2
-# sweeps = {'456':[{'subject_id':478407,'session':1,'cell_number':7,'sweep_number':4,'start_time':35,'zoom_start_time':44}],
-#           '686':[{'subject_id':472180,'session':1,'cell_number':1,'sweep_number':1,'start_time':50,'zoom_start_time':56}],#132
-#           '688':[{'subject_id':479119,'session':1,'cell_number':9,'sweep_number':2,'start_time':25,'zoom_start_time':69}]
-#           }
-# =============================================================================
+# putative interneurons
+movie_length = 80 #s
+zoom_length = 10#2
+sweeps = {'456':[{'subject_id':478407,'session':1,'cell_number':7,'sweep_number':4,'start_time':35,'zoom_start_time':44}],
+          '686':[{'subject_id':472180,'session':1,'cell_number':1,'sweep_number':1,'start_time':50,'zoom_start_time':56}],#132
+          '688':[{'subject_id':479571,'session':1,'cell_number':3,'sweep_number':0,'start_time':40,'zoom_start_time':46}]#{'subject_id':479119,'session':1,'cell_number':9,'sweep_number':2,'start_time':25,'zoom_start_time':69}]
+          }
 
 # =============================================================================
-# sweeps = {'456':[{'subject_id':471993,'session':1,'cell_number':2,'sweep_number':2,'start_time':20}],
-#           '686':[{'subject_id':479570,'session':1,'cell_number':1,'sweep_number':4,'start_time':31},
-#                  {'subject_id':479117,'session':1,'cell_number':8,'sweep_number':4,'start_time':110}],
-#           '688':[{'subject_id':472181,'session':1,'cell_number':3,'sweep_number':4,'start_time':80},
-#                  {'subject_id':472181,'session':1,'cell_number':1,'sweep_number':0,'start_time':37},
-#                  {'subject_id':472181,'session':1,'cell_number':1,'sweep_number':3,'start_time':16}]
+# sweeps = {'456':[{'subject_id':478407,'session':1,'cell_number':7,'sweep_number':4,'start_time':0,'zoom_start_time':44}],#4
+#           '686':[{'subject_id':472180,'session':1,'cell_number':1,'sweep_number':1,'start_time':0,'zoom_start_time':44}],
+#           '688':[{'subject_id':479571,'session':1,'cell_number':3,'sweep_number':0,'start_time':0,'zoom_start_time':44},
+#                  {'subject_id':479571,'session':1,'cell_number':3,'sweep_number':2,'start_time':0,'zoom_start_time':44}]
 #           }
+# 
 # =============================================================================
 plot_parameters = {'gaussian_filter_sigma':5,
                    'cawave_rneu' : .8,
                    'rownum' : 4,
                    'cax_limits' : [0,99],
                    'alpha_roi':.3,
-                   'filename':'pyr',
+                   'filename':'int',
                    'figures_dir':figures_dir,
                    'movie_length':movie_length,
                    'zoom_length':zoom_length,
@@ -2122,11 +2310,70 @@ plot_parameters = {'gaussian_filter_sigma':5,
                    }
 
 manuscript_figures_core.plot_sample_traces(plot_parameters)
+#%% select interneuron sample cells - median of each sample
+# change this to max firing rate and baseline corrected F0 instead of ahp and width
+example_list = []
+dff_percentile = 99
+firing_rate_name = 'cell_max_firing_rate_1s'
+firing_rate_name_ = 'cell_mean_firing_rate'
+for sensor in sensors:
+    for celltype in ['int','pyr']:
+        data = imaging_gt.CellBaselineFluorescence()*ephysanal_cell_attached.SweepMaxFiringRate()*ephysanal_cell_attached.CellMeanFiringRate()*imaging_gt.CellMovieDynamicRange()*ephysanal_cell_attached.EphysCellType()*imaging_gt.SessionCalciumSensor()&'session_calcium_sensor = "{}"'.format(sensor)&'ephys_cell_type = "{}"'.format(celltype)
+        f0,dff,mean_firing_rate,subject_id,session,cell_number,sweep_number,mean_firing_rate_ = data.fetch('cell_baseline_roi_f0_median','movie_dff_percentile_{}'.format(dff_percentile),firing_rate_name,'subject_id','session','cell_number','sweep_number',firing_rate_name_)
+        mean_firing_rate = mean_firing_rate-mean_firing_rate_
+        #median_idx = np.argmin(np.abs(np.argsort(f0)-len(f0)/2*0)+np.abs(np.abs(np.argsort(mean_firing_rate)-len(mean_firing_rate)/2)))
+        #median_idx = np.argmax(dff)
+        #median_idx = np.argmin(np.abs(scipy.stats.zscore(f0))+np.abs(scipy.stats.zscore(mean_firing_rate)))
+        data = imaging_gt.ROISweepCorrespondance*imaging_gt.CellBaselineFluorescence()*ephysanal_cell_attached.EphysCellType()*imaging_gt.CellDynamicRange()*imaging_gt.SessionCalciumSensor()&'session_calcium_sensor = "{}"'.format(sensor)&'ephys_cell_type = "{}"'.format(celltype)
+        f0,dff,subject_id,session,cell_number= data.fetch('cell_baseline_roi_f0_median','cell_dff_percentile_{}'.format(dff_percentile),'subject_id','session','cell_number')
+        median_idx = np.argmax(dff)
+        example_key = {'subject_id':subject_id[median_idx],
+                       'session':session[median_idx],
+                       'cell_number':cell_number[median_idx],
+                       'sensor':sensor,
+                       'cell_type':celltype,
+                       #'sweep_number':sweep_number[median_idx],
+                       'max_dff' :np.max(dff)
+                       }
+        example_list.append(example_key)
 
 
 
 #%%#######################################################################SAMPLE TRACES - END################################################################################
 #################################################################################%%############################################################################################
+#%% plot unidentified cells with movies - not much to see here..
+sweeps = {}
+for sensor in np.unique(imaging_gt.SessionCalciumSensor().fetch('session_calcium_sensor')):
+    sweeps[sensor] = []
+    cells_now = imaging_gt.SessionCalciumSensor()*ephysanal_cell_attached.EphysCellType()&'ephys_cell_type = "unidentified"'&'session_calcium_sensor = "{}"'.format(sensor)
+    for cell in cells_now:
+        for sweep in ephys_cell_attached.Sweep()&cell:
+            dict_now = {'subject_id':cell['subject_id'],
+                        'session':cell['session'],
+                        'cell_number':cell['cell_number'],
+                        'sweep_number':sweep['sweep_number'],
+                        'start_time':0,
+                        'zoom_start_time':0}
+            if len((imaging.ROI()*imaging.Movie()*imaging_gt.ROISweepCorrespondance()*imaging.RegisteredMovieImage()&dict_now&'channel_number = 1'))>0:
+                sweeps[sensor].append(dict_now)
+            
+    
+    #break
+#%
+plot_parameters = {'gaussian_filter_sigma':5,
+                   'cawave_rneu' : .8,
+                   'rownum' : 4,
+                   'cax_limits' : [0,99],
+                   'alpha_roi':.3,
+                   'filename':'pyr',
+                   'figures_dir':figures_dir,
+                   'movie_length':120,
+                   'zoom_length':30,
+                   'sweeps':sweeps,
+                   'sensor_colors':sensor_colors
+                   }
+
+manuscript_figures_core.plot_sample_traces(plot_parameters)
 
 #%%
 #%%#######################################################################PROTEIN EXPRESSION - START################################################################################
@@ -2134,20 +2381,25 @@ manuscript_figures_core.plot_sample_traces(plot_parameters)
 
 from utils import utils_anatomy
 
-injection_site_dict = utils_anatomy.digest_anatomy_json_file()
+injection_site_dict = utils_anatomy.digest_anatomy_json_file(plotit = False)
+ilastik_data_all,slice_data_all = utils_anatomy.export_ilastik_data()               
 sensor_f_corrs = utils_anatomy.export_in_vivo_brightnesses()
 #%%
+from matplotlib import ticker as mticker
 sensors = ['GCaMP7F','XCaMPgf','456','686','688']
 sensor_names = {'GCaMP7F': 'jGCaMP7f',
                 'XCaMPgf': 'XCaMPgf',
                 '456': 'jGCaMP8f',
                 '686': 'jGCaMP8m',
                 '688': 'jGCaMP8s'}
-fig_expression = plt.figure(figsize = [15,10])
-ax_rfp = fig_expression.add_subplot(2,2,1)
-ax_in_vivo = fig_expression.add_subplot(2,2,2)
-ax_in_vivo_gt = fig_expression.add_subplot(2,2,4)
-ax_fitc = fig_expression.add_subplot(2,2,3)
+ilastik_intensity_name = 'Mean Intensity'
+fig_expression = plt.figure(figsize = [22.5,10])
+ax_rfp = fig_expression.add_subplot(2,3,1)
+ax_rfp_ilastik = fig_expression.add_subplot(2,3,2)
+ax_in_vivo = fig_expression.add_subplot(2,3,3)
+ax_in_vivo_gt = fig_expression.add_subplot(2,3,6)
+ax_fitc = fig_expression.add_subplot(2,3,4)
+ax_fitc_ilastik = fig_expression.add_subplot(2,3,5)
 sensor_num_list = list()
 rfp_intensity_list = list()
 fitc_intensity_list = list()
@@ -2156,7 +2408,15 @@ sensor_num_list_invivo = list()
 closest_to_median_files = list()
 sensor_num_list_gt = list()
 in_vivo_gt_f0_list = list()
+ilastik_fitc_list = list()
+ilastik_rfp_list = list()
+ilastik_sensor_num_list = list()
 for sensor_i,sensor in enumerate(sensor_names.keys()):
+    
+    
+    ilastik_fitc_good_cell = ilastik_data_all.loc[(ilastik_data_all['Predicted Class']=='Good Cell')&(ilastik_data_all['sensor']==sensor),'{}_1'.format(ilastik_intensity_name)].values    
+    ilastik_rfp_good_cell = ilastik_data_all.loc[(ilastik_data_all['Predicted Class']=='Good Cell')&(ilastik_data_all['sensor']==sensor),'{}_0'.format(ilastik_intensity_name)].values
+
 
     baselines_ground_truth = (imaging_gt.CellBaselineFluorescence()*imaging_gt.SessionCalciumSensor()&'session_calcium_sensor = "{}"'.format(sensor)).fetch('cell_baseline_roi_f0_median')
     baselines_ground_truth = baselines_ground_truth[np.isnan(baselines_ground_truth) == False]
@@ -2175,11 +2435,18 @@ for sensor_i,sensor in enumerate(sensor_names.keys()):
         fitc_baselne = np.median(fitc_values)
         invivo_baseline = np.median(invivo_data)
         invivo_gt_baseline = np.median(baselines_ground_truth)
+        ilastik_fitc_baseline = np.median(ilastik_fitc_good_cell)
+        ilastik_rfp_baseline = np.median(ilastik_rfp_good_cell)
     
     rfp_values = rfp_values/rfp_baselne
     fitc_values = fitc_values/fitc_baselne
     invivo_data = invivo_data/invivo_baseline
+    invivo_data_log = np.log10(invivo_data)
     baselines_ground_truth = baselines_ground_truth/invivo_gt_baseline
+    ilastik_fitc_good_cell = ilastik_fitc_good_cell/ilastik_fitc_baseline
+    ilastik_fitc_good_cell_log = np.log10(ilastik_fitc_good_cell)
+    ilastik_rfp_good_cell = ilastik_rfp_good_cell/ilastik_rfp_baseline
+    ilastik_rfp_good_cell_log = np.log10(ilastik_rfp_good_cell)
     
     rfp_intensity_list.append(rfp_values)
     fitc_intensity_list.append(fitc_values)
@@ -2187,18 +2454,43 @@ for sensor_i,sensor in enumerate(sensor_names.keys()):
     sensor_num_list_invivo.append(np.ones(len(invivo_data))*sensor_i)
     in_vivo_gt_f0_list.append(baselines_ground_truth)
     sensor_num_list_gt.append(np.ones(len(baselines_ground_truth))*sensor_i)
+    ilastik_fitc_list.append(ilastik_fitc_good_cell)
+    ilastik_rfp_list.append(ilastik_rfp_good_cell)
+    ilastik_sensor_num_list.append(np.ones(len(ilastik_rfp_good_cell))*sensor_i)
     
     ax_rfp.bar(sensor_i,np.median(rfp_values),edgecolor = sensor_colors[sensor],fill=False,linewidth = 4)
     ax_fitc.bar(sensor_i,np.median(fitc_values),edgecolor = sensor_colors[sensor],fill=False,linewidth = 4)
     ax_in_vivo_gt.bar(sensor_i,np.median(baselines_ground_truth),edgecolor = sensor_colors[sensor],fill=False,linewidth = 4)
     #ax_in_vivo.bar(sensor_i,np.mean(invivo_data),edgecolor = sensor_colors[sensor],fill=False,linewidth = 4)
-    violin_parts  = ax_in_vivo.violinplot(invivo_data,positions = [sensor_i],widths = [.9],showmedians = True,showextrema = False)
+    violin_parts  = ax_in_vivo.violinplot(invivo_data_log,positions = [sensor_i],widths = [.9],showmedians = True,showextrema = False)
     violin_parts['bodies'][0].set_facecolor(sensor_colors[sensor])
     violin_parts['bodies'][0].set_edgecolor(sensor_colors[sensor])
     violin_parts['cmedians'].set_color(sensor_colors[sensor])
-ax_in_vivo.set_yscale('log')
+    
+    violin_parts  = ax_rfp_ilastik.violinplot(ilastik_rfp_good_cell_log,positions = [sensor_i],widths = [.9],showmedians = True,showextrema = False)
+    violin_parts['bodies'][0].set_facecolor(sensor_colors[sensor])
+    violin_parts['bodies'][0].set_edgecolor(sensor_colors[sensor])
+    violin_parts['cmedians'].set_color(sensor_colors[sensor])
+    
+    violin_parts  = ax_fitc_ilastik.violinplot(ilastik_fitc_good_cell_log,positions = [sensor_i],widths = [.9],showmedians = True,showextrema = False)
+    violin_parts['bodies'][0].set_facecolor(sensor_colors[sensor])
+    violin_parts['bodies'][0].set_edgecolor(sensor_colors[sensor])
+    violin_parts['cmedians'].set_color(sensor_colors[sensor])
+    
+#ax_in_vivo.set_yscale('log')
+ax_in_vivo.yaxis.set_ticks(range(-2,2))
+ax_in_vivo.yaxis.set_ticks([np.log10(x) for p in range(-2,2) for x in np.linspace(10**p, 10**(p+1), 10)], minor=True)
+ax_in_vivo.yaxis.set_major_formatter(mticker.StrMethodFormatter("$10^{{{x:.0f}}}$"))
+ax_rfp_ilastik.yaxis.set_ticks(range(0,1))
+ax_rfp_ilastik.yaxis.set_ticks([np.log10(x) for p in range(0,1) for x in np.linspace(10**p, 10**(p+1), 10)], minor=True)
+ax_rfp_ilastik.yaxis.set_major_formatter(mticker.StrMethodFormatter("$10^{{{x:.0f}}}$"))
+ax_fitc_ilastik.yaxis.set_ticks(range(0,1))
+ax_fitc_ilastik.yaxis.set_ticks([np.log10(x) for p in range(0,1) for x in np.linspace(10**p, 10**(p+1), 10)], minor=True)
+ax_fitc_ilastik.yaxis.set_major_formatter(mticker.StrMethodFormatter("$10^{{{x:.0f}}}$"))
+plt.show()    
 ax_in_vivo_gt.set_yscale('log')
-
+#ax_rfp_ilastik.set_yscale('log')
+#ax_fitc_ilastik.set_yscale('log')
 # =============================================================================
 #     break
 # =============================================================================
@@ -2215,6 +2507,16 @@ ax_rfp.set_ylabel('Anti-GFP fluorescence')
 ax_in_vivo.set_xticks(np.arange(len(sensors)))
 ax_in_vivo.set_xticklabels(sensor_names_list, rotation = 20) 
 ax_in_vivo.set_ylabel('In vivo baseline fluorescence')
+
+ax_rfp_ilastik.set_xticks(np.arange(len(sensors)))
+ax_rfp_ilastik.set_xticklabels(sensor_names_list, rotation = 20) 
+ax_rfp_ilastik.set_ylabel('Anti-GFP fluorescence')
+
+ax_fitc_ilastik.set_xticks(np.arange(len(sensors)))
+ax_fitc_ilastik.set_xticklabels(sensor_names_list, rotation = 20) 
+ax_fitc_ilastik.set_ylabel('Fixed native fluorescence')
+
+
 ax_fitc.set_xticks(np.arange(len(sensors)))
 ax_fitc.set_xticklabels(sensor_names_list, rotation = 20) 
 ax_fitc.set_ylabel('Fixed native fluorescence')
