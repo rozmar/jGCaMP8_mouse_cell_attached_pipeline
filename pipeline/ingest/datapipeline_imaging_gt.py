@@ -29,6 +29,8 @@ def populatemytables_core_paralel(arguments,runround):
         imaging_gt.ROIDwellTime().populate(**arguments)
         imaging_gt.ROINeuropilCorrelation().populate(**arguments)
         imaging_gt.MovieDepth().populate(**arguments)
+        imaging_gt.CellDynamicRange().populate(**arguments)
+        imaging_gt.CellMovieDynamicRange().populate(**arguments)
         
     elif runround == 2:
         imaging_gt.LFPNeuropilCorrelation().populate(**arguments)
@@ -50,6 +52,8 @@ def populatemytables_core(arguments,runround):
         imaging_gt.ROIDwellTime().populate(**arguments)
         imaging_gt.ROINeuropilCorrelation().populate(**arguments)
         imaging_gt.MovieDepth().populate(**arguments)
+        imaging_gt.CellDynamicRange().populate(**arguments)
+        imaging_gt.CellMovieDynamicRange().populate(**arguments)
         
     elif runround == 2:
         imaging_gt.LFPNeuropilCorrelation().populate(**arguments)
