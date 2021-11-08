@@ -13,7 +13,7 @@ import os
 from skimage.io import imread
 from dask import delayed
 import matplotlib.pyplot as plt
-
+from utils import utils_anatomy
 #%% metadata
 import pandas as pd
 metadata_dir = '/home/rozmar/Data/Anatomy/Metadata'
@@ -494,3 +494,281 @@ im_r = ax_ratio.imshow(ratio_im, norm=colors.LogNorm(),cmap='magma')#,
 cbar = fig_image.colorbar(im_r,ax=ax_ratio)
 needed = imarray_green>10
 ax_gain.hist2d(imarray_green[needed],ratio_im.flatten()[needed],500,norm=colors.LogNorm(), cmap='magma')
+
+
+#%% Analyze ilastik output
+import numpy as np
+import subprocess
+import os
+import matplotlib.pyplot as plt
+from matplotlib.gridspec import GridSpec
+import datajoint as dj
+dj.conn()
+from pipeline import pipeline_tools,lab, experiment, ephys_cell_attached,ephysanal_cell_attached, imaging, imaging_gt
+from plot import manuscript_figures_core , cell_attached_ephys_plot, imaging_gt_plot
+from utils import utils_plot,utils_ephys,utils_anatomy
+import pandas as pd
+import seaborn as sns
+import matplotlib
+
+import matplotlib.gridspec as gridspec
+boxplot_colors = {'456':'#0000ff',
+                  '686':'#ff0000',
+                  '688':'#666666',  
+                  'GCaMP7F':'#00ff00',
+                  'XCaMPgf':'#0099ff'}
+sensor_colors ={'GCaMP7F':'green',
+                'XCaMPgf':'#0099ff',#'orange',
+                '456':'blue',
+                '686':'red',
+                '688':'black',
+                'boxplot':boxplot_colors}
+font = {'family' : 'normal',
+        'weight' : 'normal',
+        'size'   : 13}
+figures_dir = '/home/rozmar/Data/shared_dir/GCaMP8/'
+matplotlib.rc('font', **font)
+matplotlib.rcParams['font.family'] = 'sans-serif'
+matplotlib.rcParams['font.sans-serif'] = ['Tahoma']
+%matplotlib qt
+ilastik_batch_dir = '/home/rozmar/Data/Anatomy/ilastik/raw/batch'
+anatomy_metadata = pd.read_csv("/home/rozmar/Data/Anatomy/Metadata/experiments.csv")
+injection_site_dict = utils_anatomy.digest_anatomy_json_file()
+#%%
+ilastik_data_all,slice_data_all = utils_anatomy.export_ilastik_data()               
+#            break
+        
+    #break
+#%%
+font = {'family' : 'normal',
+        'weight' : 'normal',
+        'size'   : 16}
+matplotlib.rc('font', **font)
+matplotlib.rcParams['font.family'] = 'sans-serif'
+matplotlib.rcParams['font.sans-serif'] = ['Tahoma']
+boxplot_colors = {'UF456':'#0000ff',
+                  'UF686':'#ff0000',
+                  'UF688':'#666666',  
+                  'G7F':'#00ff00',
+                  'XCaMP':'#0099ff'}
+sensor_colors_anatomy ={'G7F':'green',
+                        'XCaMP':'#0099ff',#'orange',
+                        'UF456':'blue',
+                        'UF686':'red',
+                        'UF688':'black',
+                        'boxplot':boxplot_colors}
+sensor_colors_anatomy = sensor_colors
+sensors_anat = sensors#['UF456', 'UF686', 'UF688','G7F','XCaMP']#slice_data_all['sensor'].unique()
+
+fig = plt.figure(figsize = [15,15])
+ax_filled_cell_ratio = fig.add_subplot(3,1,1)
+ax_filled_cell_num = fig.add_subplot(3,1,2,sharex = ax_filled_cell_ratio)
+ax_slice_num = fig.add_subplot(3,1,3,sharex = ax_filled_cell_ratio)
+for i,sensor in enumerate(sensors_anat):
+    z = slice_data_all.loc[slice_data_all['sensor']==sensor,'z_to_injection'].values
+    filled_ratio = slice_data_all.loc[slice_data_all['sensor']==sensor,'filled_cell_ratio'].values#filled_cell_ratio
+    filled_num = slice_data_all.loc[slice_data_all['sensor']==sensor,'cell_num'].values#filled_cell_ratio
+    
+    ax_filled_cell_ratio.plot(z+i*50/len(sensors_anat)-25,filled_ratio,'o',color = sensor_colors_anatomy[sensor],alpha = .3)
+    ax_filled_cell_num.plot(z+i*50/len(sensors_anat)-25,filled_num,'o',color = sensor_colors_anatomy[sensor],alpha = .3)
+    z_scale = np.unique(z)
+    filled_ratio_mean = []
+    filled_ratio_std = []
+    filled_ratio_se = []
+    filled_num_mean = []
+    filled_num_std = []
+    filled_num_se = []
+    n = []
+    for z_now in z_scale:
+        filled_ratio_mean.append(np.mean(filled_ratio[z==z_now]))
+        n.append(np.sum(z==z_now))
+        filled_ratio_std.append(np.std(filled_ratio[z==z_now]))
+        filled_ratio_se.append(np.std(filled_ratio[z==z_now])/np.sqrt(np.sum(z==z_now)))
+
+        filled_num_mean.append(np.mean(filled_num[z==z_now]))
+        filled_num_std.append(np.std(filled_num[z==z_now]))
+        filled_num_se.append(np.std(filled_num[z==z_now])/np.sqrt(np.sum(z==z_now)))
+        
+    ax_filled_cell_ratio.plot(z_scale,filled_ratio_mean,'-',color = sensor_colors_anatomy[sensor],alpha = 1,linewidth = 3)
+    ax_filled_cell_ratio.errorbar(z_scale,filled_ratio_mean,filled_ratio_se,fmt = '-',color = sensor_colors_anatomy[sensor],alpha = 1)
+    
+    ax_filled_cell_num.plot(z_scale,filled_num_mean,'-',color = sensor_colors_anatomy[sensor],alpha = 1,linewidth = 3)
+    ax_filled_cell_num.errorbar(z_scale,filled_num_mean,filled_num_se,fmt = '-',color = sensor_colors_anatomy[sensor],alpha = 1)
+    
+    ax_slice_num.bar(z_scale+i*50/len(sensors_anat)-25,n,50/len(sensors_anat),color = sensor_colors_anatomy[sensor],alpha = .5)
+ax_filled_cell_ratio.set_xticks([50,150,250,350,450])
+ax_filled_cell_ratio.set_xticklabels(['0-50','100-150','200-250','300-350','400-450'])
+ax_filled_cell_ratio.set_xlim([0,500])
+ax_filled_cell_ratio.set_xlabel('Microns away from injection site')
+ax_filled_cell_ratio.set_ylabel('Fraction of filled cells')
+
+ax_filled_cell_num.set_xlabel('Microns away from injection site')
+ax_filled_cell_num.set_ylabel('Number of labelled cells per section')
+
+ax_slice_num.set_xlabel('Microns away from injection site')
+ax_slice_num.set_ylabel('Number of sections used')
+#ax_filled_cell_ratio.set_yscale('log')   
+#%% 
+
+
+#%% show probabilities of ilastik classification
+ilastik_intensity_name = 'Mean Intensity'
+fig_probs = plt.figure(figsize = [10,10])
+ax_good_cell = fig_probs.add_subplot(3,2,1)
+ax_good_cell.set_title('probability of good cell identity')
+ax_filled_cell = fig_probs.add_subplot(3,2,2)
+ax_filled_cell.set_title('probability of filled cell identity')
+
+ax_good_fitc = fig_probs.add_subplot(3,2,3)
+ax_filled_fitc = fig_probs.add_subplot(3,2,4)
+ax_good_rfp = fig_probs.add_subplot(3,2,5)
+ax_filled_rfp = fig_probs.add_subplot(3,2,6)
+for sensor_i,sensor in enumerate(sensors_anat):
+    prob_good_cell = ilastik_data_all.loc[(ilastik_data_all['Predicted Class']=='Good Cell')&(ilastik_data_all['sensor']==sensor),'Probability of Good Cell'].values
+    violin_parts = ax_good_cell.violinplot(prob_good_cell,positions = [sensor_i],widths = [.9],showmedians = True,showextrema = False)
+    violin_parts['bodies'][0].set_facecolor(sensor_colors_anatomy[sensor])
+    violin_parts['bodies'][0].set_edgecolor(sensor_colors_anatomy[sensor])
+    violin_parts['cmedians'].set_color(sensor_colors_anatomy[sensor])
+    
+    prob_filled_cell = ilastik_data_all.loc[(ilastik_data_all['Predicted Class']=='Filled')&(ilastik_data_all['sensor']==sensor),'Probability of Filled'].values
+    violin_parts = ax_filled_cell.violinplot(prob_filled_cell,positions = [sensor_i],widths = [.9],showmedians = True,showextrema = False)
+    violin_parts['bodies'][0].set_facecolor(sensor_colors_anatomy[sensor])
+    violin_parts['bodies'][0].set_edgecolor(sensor_colors_anatomy[sensor])
+    violin_parts['cmedians'].set_color(sensor_colors_anatomy[sensor])
+    
+    
+    fitc_baseline = np.median(ilastik_data_all.loc[(ilastik_data_all['Predicted Class']=='Good Cell')&(ilastik_data_all['sensor']==sensor),'{}_1'.format(ilastik_intensity_name)].values)
+    rfp_baseline = np.median(ilastik_data_all.loc[(ilastik_data_all['Predicted Class']=='Good Cell')&(ilastik_data_all['sensor']==sensor),'{}_0'.format(ilastik_intensity_name)].values)
+    
+    fitc_good_cell = ilastik_data_all.loc[(ilastik_data_all['Predicted Class']=='Good Cell')&(ilastik_data_all['sensor']==sensor),'{}_1'.format(ilastik_intensity_name)].values
+    fitc_good_cell = fitc_good_cell/fitc_baseline
+    violin_parts = ax_good_fitc.violinplot(fitc_good_cell,positions = [sensor_i],widths = [.9],showmedians = True,showextrema = False)
+    violin_parts['bodies'][0].set_facecolor(sensor_colors_anatomy[sensor])
+    violin_parts['bodies'][0].set_edgecolor(sensor_colors_anatomy[sensor])
+    violin_parts['cmedians'].set_color(sensor_colors_anatomy[sensor])
+# =============================================================================
+#     ax_good_fitc.yaxis.set_major_formatter(mticker.StrMethodFormatter("$10^{{{x:.0f}}}$"))
+#     ax_good_fitc.yaxis.set_ticks([np.log10(x) for p in range(-1,1) for x in np.linspace(10**p, 10**(p+1), 10)], minor=True)
+# =============================================================================
+    
+    fitc_filled_cell = ilastik_data_all.loc[(ilastik_data_all['Predicted Class']=='Filled')&(ilastik_data_all['sensor']==sensor),'{}_1'.format(ilastik_intensity_name)].values
+    fitc_filled_cell = fitc_filled_cell/fitc_baseline
+    violin_parts = ax_filled_fitc.violinplot(fitc_filled_cell,positions = [sensor_i],widths = [.9],showmedians = True,showextrema = False)
+    violin_parts['bodies'][0].set_facecolor(sensor_colors_anatomy[sensor])
+    violin_parts['bodies'][0].set_edgecolor(sensor_colors_anatomy[sensor])
+    violin_parts['cmedians'].set_color(sensor_colors_anatomy[sensor])
+# =============================================================================
+#     ax_filled_fitc.yaxis.set_major_formatter(mticker.StrMethodFormatter("$10^{{{x:.0f}}}$"))
+#     ax_filled_fitc.yaxis.set_ticks([np.log10(x) for p in range(0,2) for x in np.linspace(10**p, 10**(p+1), 10)], minor=True)
+# =============================================================================
+    
+    rfp_good_cell = ilastik_data_all.loc[(ilastik_data_all['Predicted Class']=='Good Cell')&(ilastik_data_all['sensor']==sensor),'{}_0'.format(ilastik_intensity_name)].values
+    rfp_good_cell = rfp_good_cell/rfp_baseline
+    violin_parts = ax_good_rfp.violinplot(rfp_good_cell,positions = [sensor_i],widths = [.9],showmedians = True,showextrema = False)
+    violin_parts['bodies'][0].set_facecolor(sensor_colors_anatomy[sensor])
+    violin_parts['bodies'][0].set_edgecolor(sensor_colors_anatomy[sensor])
+    violin_parts['cmedians'].set_color(sensor_colors_anatomy[sensor])
+# =============================================================================
+#     ax_good_rfp.yaxis.set_major_formatter(mticker.StrMethodFormatter("$10^{{{x:.0f}}}$"))
+#     #ax_good_rfp.set_ylim([-1,1])
+#     ax_good_rfp.yaxis.set_ticks([np.log10(x) for p in range(-1,1) for x in np.linspace(10**p, 10**(p+1), 10)], minor=True)
+#     ax_good_rfp.axis('tight')
+# =============================================================================
+    
+    rfp_filled_cell = ilastik_data_all.loc[(ilastik_data_all['Predicted Class']=='Filled')&(ilastik_data_all['sensor']==sensor),'{}_1'.format(ilastik_intensity_name)].values
+    rfp_filled_cell = rfp_filled_cell/rfp_baseline
+    violin_parts = ax_filled_rfp.violinplot(rfp_filled_cell,positions = [sensor_i],widths = [.9],showmedians = True,showextrema = False)
+    violin_parts['bodies'][0].set_facecolor(sensor_colors_anatomy[sensor])
+    violin_parts['bodies'][0].set_edgecolor(sensor_colors_anatomy[sensor])
+    violin_parts['cmedians'].set_color(sensor_colors_anatomy[sensor])
+# =============================================================================
+#     ax_filled_rfp.yaxis.set_major_formatter(mticker.StrMethodFormatter("$10^{{{x:.0f}}}$"))
+#     ax_filled_rfp.yaxis.set_ticks([np.log10(x) for p in range(-1,1) for x in np.linspace(10**p, 10**(p+1), 10)], minor=True)
+# =============================================================================
+    
+    
+#%% for Karel - there are extremely bright cells
+ilastik_intensity_name = 'Maximum intensity'
+ilastik_intensity_name = 'Mean Intensity'
+fitc_all_cells = ilastik_data_all.loc[((ilastik_data_all['Predicted Class']=='Good Cell')|(ilastik_data_all['Predicted Class']=='Filled'))&(ilastik_data_all['sensor']==sensor),'{}_1'.format(ilastik_intensity_name)].values
+plt.hist(np.log10(fitc_all_cells),100)
+#%% select a slice and show
+from PIL import Image
+font = {'family' : 'normal',
+        'weight' : 'normal',
+        'size'   : 6}
+matplotlib.rc('font', **font)
+matplotlib.rcParams['font.family'] = 'sans-serif'
+matplotlib.rcParams['font.sans-serif'] = ['Tahoma']
+image_radius = 20
+probability_range = .1 #up and down
+probabilities = [1,.75,.5,.25]    
+sensors_prob = ['UF456', 'UF686', 'UF688','G7F','XCaMP']
+celltypes = ['Good Cell','Filled']
+fig_example = plt.figure(figsize = [17,20])
+gs = gridspec.GridSpec(len(probabilities)*3, len(sensors_prob)*len(celltypes), figure=fig_example)
+for sensor_i,sensor in enumerate(sensors_prob):
+    for celltype_i,celltype in enumerate(celltypes):
+        for prob_i,probability in enumerate(probabilities):
+            needed_sensor = ilastik_data_all['sensor']==sensor
+            needed_celltype = ilastik_data_all['Predicted Class']==celltype
+            needed_prob =  (ilastik_data_all['Probability of {}'.format(celltype)]>=probability-probability_range) & (ilastik_data_all['Probability of {}'.format(celltype)]<=probability+probability_range)
+            data_now = ilastik_data_all.loc[needed_celltype&needed_sensor&needed_prob].reset_index()
+            if len(data_now)==0:
+                continue
+            Failure = True
+            while Failure:
+                ax_g = fig_example.add_subplot(gs[prob_i*3:prob_i*3+3,sensor_i+celltype_i*len(sensors_prob)])
+                ax_g.set_xticks([])
+                ax_g.set_yticks([])
+                for axis in ['top','left','right']:
+                    ax_g.spines[axis].set_linewidth(1)
+                    ax_g.spines[axis].set_position(("outward",2))
+                try:
+                    row_now = data_now.sample()
+                    exp_name = row_now['exp_name'].values[0]
+                    z= row_now['section_z'].values[0]
+                    y = int(row_now['Center of the object_0'].values[0])
+                    x = int(row_now['Center of the object_1'].values[0])
+                    if anatomy_metadata.loc[anatomy_metadata['Spreadsheet ID'] ==exp_name,'pixel size of export'].values[0]<.5:
+                        im_to_show_merge = np.zeros([image_radius*4,image_radius*4,3])
+                    else:                      
+                        im_to_show_merge = np.zeros([image_radius*2,image_radius*2,3])
+                    for channel_i,(channel,maxval) in enumerate(zip(['RFP','FITC','merge'],[20000,10000,None])):
+                        ax_now = fig_example.add_subplot(gs[prob_i*3+channel_i,sensor_i+celltype_i*len(sensors_prob)])
+                        if channel =='merge':
+                            ax_now.imshow(im_to_show_merge,aspect = 'auto')
+                            ax_now.axis('off')
+                            continue
+                            
+                        fname_file = '/home/rozmar/Data/Anatomy/cropped_rotated/{}/{}/{}_{}_Z_{}.tiff'.format(exp_name,channel,exp_name,channel,z)
+                        im= np.asarray(Image.open(fname_file))
+                        if anatomy_metadata.loc[anatomy_metadata['Spreadsheet ID'] ==exp_name,'pixel size of export'].values[0]<.5:
+                            im_cropped = im[x-image_radius*2:x+image_radius*2,y-image_radius*2:y+image_radius*2]
+                            im_to_show = np.zeros([image_radius*4,image_radius*4,3])
+                        else:
+                            im_cropped = im[x-image_radius:x+image_radius,y-image_radius:y+image_radius]
+                            im_to_show = np.zeros([image_radius*2,image_radius*2,3])
+                        im_to_show[:,:,channel_i] = im_cropped/maxval#np.max(im_cropped)
+                        im_to_show_merge[:,:,channel_i] = im_cropped/maxval#np.max(im_cropped)
+                        ax_now.imshow(im_to_show,aspect = 'auto')
+                        if channel_i == 0:
+                            ax_now.set_title('{}-{}-{}%'.format(sensor,celltype,int(row_now['Probability of {}'.format(celltype)].values[0]*100)))
+                        ax_now.axis('off')
+                        #asd
+                    Failure = False
+                except:
+                    pass
+                        
+                
+            
+            #ax_now.axis('off')
+            
+            
+    
+
+#slice_data_all.loc[(slice_data_all['z_to_injection']<150)&(slice_data_all['filled_cell_ratio']>.15),['brain_name','section_z']]
+slice_data_all.loc[(slice_data_all['z_to_injection']<150)&(slice_data_all['filled_cell_ratio']>.3),['brain_name','section_z']]
+
+
+
