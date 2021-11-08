@@ -189,7 +189,64 @@ class CellBaselineFluorescence(dj.Computed):
         self.insert1(key,skip_duplicates=True)
         #plt.plot(isis,baselines_corrected,'ko')
         #%
-
+@schema
+class CellDynamicRange(dj.Computed):
+    definition = """# 
+    -> ephys_cell_attached.Cell
+    ---
+    cell_f0_median = null          : double # median F0 - neuropil subtracted    
+    cell_dff_percentile_100  = null : double
+    cell_dff_percentile_99  = null : double
+    cell_dff_percentile_95  = null : double
+    cell_dff_percentile_90  = null : double
+    cell_dff_percentile_80  = null : double
+    cell_dff_percentile_70  = null : double
+    cell_dff_percentile_60  = null : double
+    cell_dff_percentile_50  = null : double
+    """
+    def make(self, key):
+        #%
+        fs = 122
+        sig_baseline = 40 
+        win_baseline = int(60*fs)
+        filter_sigma = 0.01
+        #key = {'subject_id':471991,'session':1,'cell_number':3}
+        key_extra = {'channel_number':1,
+                     'roi_type':'Suite2P',
+                     'motion_correction_method':'Suite2P',
+                     'roi_type':'Suite2P',
+                     'neuropil_number':1,
+                     'neuropil_subtraction':'0.8',
+                     'gaussian_filter_sigma':10
+                     }
+        #%
+        F_list,Fneu_list = (imaging.ROINeuropilTrace()*imaging.ROITrace()*ROISweepCorrespondance()&key&key_extra).fetch('roi_f','neuropil_f')
+        dFF_list = []
+        f0_list = []
+        try:
+                
+            for F,Fneu in zip(F_list,Fneu_list):
+                
+                #noncell = iscell[:,0] ==0
+                Fcorr= F-Fneu*.7
+    
+                Flow = ndimage.filters.gaussian_filter(Fcorr,    sig_baseline)
+                Flow = ndimage.filters.minimum_filter1d(Flow,    win_baseline)
+                Flow = ndimage.filters.maximum_filter1d(Flow,    win_baseline)
+                #%
+               # dF = Fcorr-Flow
+                dFF = (Fcorr-Flow)/Flow
+                dFF = ndimage.filters.gaussian_filter(dFF,    filter_sigma*fs)
+                dFF_list.append(dFF)
+                f0_list.append(Flow)
+            dff_percentiles = np.percentile(np.concatenate(dFF_list),[50,60,70,80,90,95,99,100])
+            for p,pval in zip([50,60,70,80,90,95,99,100],dff_percentiles):
+                key['cell_dff_percentile_{}'.format(p)]=pval
+                key['cell_f0_median'] = np.median(np.concatenate(f0_list))
+            self.insert1(key,skip_duplicates=True)
+        except:
+            pass
+                
 
 @schema
 class MovieDepth(dj.Computed):
@@ -910,4 +967,64 @@ class IngestDoubletCalciumWave(dj.Computed):
         dj.conn().ping()
         DoubletCalciumWave.DoubletCalciumWaveProperties().insert(calcium_wave_properties_list, allow_direct_insert=True)#imaging_gt.
         key['doublet_cawave_complete'] = 1
-        self.insert1(key,skip_duplicates=True)        
+        self.insert1(key,skip_duplicates=True)       
+@schema
+class CellMovieDynamicRange(dj.Computed):
+    definition = """# 
+    -> ROISweepCorrespondance
+    ---
+    movie_f0_median = null          : double # median F0 - neuropil subtracted    
+    movie_dff_percentile_100  = null : double
+    movie_dff_percentile_99  = null : double
+    movie_dff_percentile_95  = null : double
+    movie_dff_percentile_90  = null : double
+    movie_dff_percentile_80  = null : double
+    movie_dff_percentile_70  = null : double
+    movie_dff_percentile_60  = null : double
+    movie_dff_percentile_50  = null : double
+    """
+    def make(self, key):
+        #%
+        fs = 122
+        sig_baseline = 40 
+        win_baseline = int(60*fs)
+        filter_sigma = 0.01
+        #key = {'subject_id':471991,'session':1,'cell_number':3}
+        key_extra = {'channel_number':1,
+                     'roi_type':'Suite2P',
+                     'motion_correction_method':'Suite2P',
+                     'roi_type':'Suite2P',
+                     'neuropil_number':1,
+                     'neuropil_subtraction':'0.8',
+                     'gaussian_filter_sigma':10
+                     }
+        #%
+        F_list,Fneu_list = (imaging.ROINeuropilTrace()*imaging.ROITrace()&key&key_extra).fetch('roi_f','neuropil_f')
+        dFF_list = []
+        f0_list = []
+        try:
+                
+            for F,Fneu in zip(F_list,Fneu_list):
+                
+                #noncell = iscell[:,0] ==0
+                Fcorr= F-Fneu*.7
+    
+                Flow = ndimage.filters.gaussian_filter(Fcorr,    sig_baseline)
+                Flow = ndimage.filters.minimum_filter1d(Flow,    win_baseline)
+                Flow = ndimage.filters.maximum_filter1d(Flow,    win_baseline)
+                #%
+               # dF = Fcorr-Flow
+                dFF = (Fcorr-Flow)/Flow
+                dFF = ndimage.filters.gaussian_filter(dFF,    filter_sigma*fs)
+                dFF_list.append(dFF)
+                f0_list.append(Flow)
+            dff_percentiles = np.percentile(np.concatenate(dFF_list),[50,60,70,80,90,95,99,100])
+            for p,pval in zip([50,60,70,80,90,95,99,100],dff_percentiles):
+                key['movie_dff_percentile_{}'.format(p)]=pval
+                key['movie_f0_median'] = np.median(np.concatenate(f0_list))
+            self.insert1(key,skip_duplicates=True)
+        except:
+            pass
+            
+        #plt.plot(isis,baselines_corrected,'ko')
+        #%
