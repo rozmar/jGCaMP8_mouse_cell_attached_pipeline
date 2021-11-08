@@ -192,6 +192,7 @@ def add_scalebar_to_fig(ax,
     print([xvalues,yvalues])
 
 def collect_ca_wave_parameters(ca_wave_parameters,cawave_properties_needed,ephys_properties_needed):
+
     parameters_must_be_downloaded = ['subject_id','session','cell_number','sweep_number','ap_group_number']
     cawave_properties_all = cawave_properties_needed.copy()
     cawave_properties_all.extend(parameters_must_be_downloaded)
@@ -265,8 +266,10 @@ def collect_ca_wave_parameters(ca_wave_parameters,cawave_properties_needed,ephys
                     cell_data[property_name] = np.asarray(cell_data[property_name])        
             #moviedepth = imaging.MovieMetaData().fetch('movie_hmotors_sample_z')        
             cell_data['cell_key'] = cellkey
+            cell_data['cell_mean_firing_rate'] = np.unique(cawaves.fetch('cell_mean_firing_rate'))[0]
             cellwave_by_cell_list.append(cell_data.copy())        
         ca_waves_dict[sensor] = cellwave_by_cell_list
+        
     return(ca_waves_dict)
     
 def collect_ca_wave_traces( ca_wave_parameters,ca_waves_dict,parameters,use_doublets = False   ):
