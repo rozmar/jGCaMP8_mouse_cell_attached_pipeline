@@ -32,10 +32,12 @@ class EphysCellType(dj.Computed):
         if len(cellspikeparameters) ==0:
             key['ephys_cell_type'] = 'unidentified'
         else:
-            if len(cellspikeparameters)>1:
-                cellspikeparameters = cellspikeparameters&'recording_mode = "current clamp"'
-            ap_peak_to_trough_time_median,ap_ahp_amplitude_median = cellspikeparameters.fetch1('ap_peak_to_trough_time_median','ap_ahp_amplitude_median')
-            if ap_peak_to_trough_time_median < 0.65 and ap_ahp_amplitude_median>.1:
+# =============================================================================
+#             if len(cellspikeparameters)>1:
+#                 cellspikeparameters = cellspikeparameters&'recording_mode = "current clamp"'
+# =============================================================================
+            ap_peak_to_trough_time_median,ap_ahp_amplitude_median = cellspikeparameters.fetch('ap_peak_to_trough_time_median','ap_ahp_amplitude_median')
+            if any(ap_peak_to_trough_time_median < 0.65) and any(ap_ahp_amplitude_median>.1): # either in CC or VC
                 key['ephys_cell_type'] = 'int'
             else:
                 key['ephys_cell_type'] = 'pyr'
@@ -57,6 +59,127 @@ class CellMeanFiringRate(dj.Computed):
         apnum = len(ActionPotential()&key)
         key['cell_mean_firing_rate'] = apnum/recording_len
         self.insert1(key,skip_duplicates=True)
+@schema
+class CellMaxFiringRate(dj.Computed):
+    definition = """
+    -> ephys_cell_attached.Cell
+    ---
+    cell_max_firing_rate_100ms : double
+    cell_max_firing_rate_500ms : double
+    cell_max_firing_rate_1s : double
+    cell_max_firing_rate_2s : double
+    cell_max_firing_rate_5s : double
+    cell_max_firing_rate_10s : double
+    """
+    def make(self, key):     
+        #%
+        if len(ActionPotential()&key)>0:
+            try:
+                dts = [.1,.5,1,2,5,10] #s
+                #key = {'subject_id':471991,'session':1,'cell_number':1}
+                sweep_t,ap_t = (ephys_cell_attached.Sweep()*ActionPotential()&key).fetch('sweep_start_time','ap_max_time')#ephysanal_cell_attached
+                ap_t = np.asarray(sweep_t+ap_t,float)
+                ap_t = ap_t-ap_t[0]
+                t_vector = np.arange(0,ap_t[-1],dts[0])
+                ap_vector= np.zeros(len(t_vector))
+                for t in ap_t:
+                    ap_vector[np.argmin(np.abs(t_vector-t))] += 1
+                for dt_now in dts:
+                    size = int(dt_now/dts[0])
+                    mask = np.ones(size)#/size
+                    ap_vector_now = np.convolve(ap_vector,mask,'same')/dt_now
+                    if dt_now < 1:
+                        text = 'cell_max_firing_rate_{}ms'.format(int(dt_now*1000))
+                    else:
+                        text = 'cell_max_firing_rate_{}s'.format(int(dt_now))
+                    key[text] = np.nanmax(ap_vector_now)
+                    #plt.plot(t_vector,ap_vector_now,label = dt_now)
+                    #break
+                #plt.legend()
+                self.insert1(key,skip_duplicates=True)
+            except:
+                print('error with cellmaxfiringrage {}'.format(key))
+
+@schema
+class SweepMaxFiringRate(dj.Computed):
+    definition = """
+    -> ephys_cell_attached.Sweep
+    ---
+    cell_max_firing_rate_100ms : double
+    cell_max_firing_rate_500ms : double
+    cell_max_firing_rate_1s : double
+    cell_max_firing_rate_2s : double
+    cell_max_firing_rate_5s : double
+    cell_max_firing_rate_10s : double
+    """
+    def make(self, key):     
+        #%
+        if len(ActionPotential()&key)>0:
+            try:
+                dts = [.1,.5,1,2,5,10] #s
+                #key = {'subject_id':471991,'session':1,'cell_number':1}
+                sweep_start_time,sweep_end_time = (ephys_cell_attached.Sweep()&key).fetch1('sweep_start_time','sweep_end_time')
+                sweep_t,ap_t = (ephys_cell_attached.Sweep()*ActionPotential()&key).fetch('sweep_start_time','ap_max_time')#ephysanal_cell_attached
+                ap_t = np.asarray(sweep_t+ap_t,float)
+                t_vector = np.arange(float(sweep_start_time),float(sweep_end_time),dts[0])
+                ap_vector= np.zeros(len(t_vector))
+                for t in ap_t:
+                    ap_vector[np.argmin(np.abs(t_vector-t))] += 1
+                for dt_now in dts:
+                    size = int(dt_now/dts[0])
+                    mask = np.ones(size)#/size
+                    ap_vector_now = np.convolve(ap_vector,mask,'valid')/dt_now
+                    if dt_now < 1:
+                        text = 'cell_max_firing_rate_{}ms'.format(int(dt_now*1000))
+                    else:
+                        text = 'cell_max_firing_rate_{}s'.format(int(dt_now))
+                    key[text] = np.nanmax(ap_vector_now)
+                    #plt.plot(t_vector,ap_vector_now,label = dt_now)
+                    #break
+                #plt.legend()
+                self.insert1(key,skip_duplicates=True)
+            except:
+                print('error with cellmaxfiringrage {}'.format(key))       
+@schema
+class SweepMinFiringRate(dj.Computed):
+    definition = """
+    -> ephys_cell_attached.Sweep
+    ---
+    cell_min_firing_rate_100ms : double
+    cell_min_firing_rate_500ms : double
+    cell_min_firing_rate_1s : double
+    cell_min_firing_rate_2s : double
+    cell_min_firing_rate_5s : double
+    cell_min_firing_rate_10s : double
+    """
+    def make(self, key):     
+        #%
+        if len(ActionPotential()&key)>0:
+            try:
+                dts = [.1,.5,1,2,5,10] #s
+                #key = {'subject_id':471991,'session':1,'cell_number':1}
+                sweep_start_time,sweep_end_time = (ephys_cell_attached.Sweep()&key).fetch1('sweep_start_time','sweep_end_time')
+                sweep_t,ap_t = (ephys_cell_attached.Sweep()*ActionPotential()&key).fetch('sweep_start_time','ap_max_time')#ephysanal_cell_attached
+                ap_t = np.asarray(sweep_t+ap_t,float)
+                t_vector = np.arange(float(sweep_start_time),float(sweep_end_time),dts[0])
+                ap_vector= np.zeros(len(t_vector))
+                for t in ap_t:
+                    ap_vector[np.argmin(np.abs(t_vector-t))] += 1
+                for dt_now in dts:
+                    size = int(dt_now/dts[0])
+                    mask = np.ones(size)#/size
+                    ap_vector_now = np.convolve(ap_vector,mask,'valid')/dt_now
+                    if dt_now < 1:
+                        text = 'cell_min_firing_rate_{}ms'.format(int(dt_now*1000))
+                    else:
+                        text = 'cell_min_firing_rate_{}s'.format(int(dt_now))
+                    key[text] = np.nanmin(ap_vector_now)
+                    #plt.plot(t_vector,ap_vector_now,label = dt_now)
+                    #break
+                #plt.legend()
+                self.insert1(key,skip_duplicates=True)
+            except:
+                print('error with cellmaxfiringrage {}'.format(key))  
     #%
 @schema
 class ActionPotential(dj.Computed):
