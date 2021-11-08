@@ -9,6 +9,10 @@ import pandas as pd
 from pathlib import Path
 import json
 from utils import utils_plot, utils_ephys
+import pynwb
+from pynwb import NWBFile, NWBHDF5IO
+from datetime import datetime
+from dateutil.tz import tzlocal
 bad_cell_blacklist = ['anm472182_cell3',
                       'anm479120_cell5',
                       'anm479571_cell3',
@@ -18,7 +22,9 @@ bad_cell_blacklist = ['anm472182_cell3',
                       'anm478342_cell4',#low snr
                       'anm478410_cell4',#low baseline f0
                       'anm478347_cell4',
-                      'anm478406_cell3']
+                      'anm478347_cell6', # no AP
+                      'anm478406_cell3',
+                      'anm478345_cell2'] # no ap
 bad_movie_blacklist = ['anm479572_cell4_movie15', #wrong ROI
                        'anm479119_cell6_movie38',
                        'anm478342_cell7_movie34']
@@ -290,12 +296,440 @@ def downsample_movies_and_ROIs(downsampling_factor = 2,overwrite = False,only_me
 
 
 #%%
+#%%
+def NWB_movie_path_and_cell_description_export():
+    #%%
+    source_dir_base = '/home/rozmar/Network/slab_share_mr'
+    column_names = ['Calcium Sensor','Subject ID','Cell number','Putative cell type','Total recording length','Recording mode','Total action potential number','Median action potential signal-to-noise ratio']
+    metadata_table = pd.DataFrame(columns = column_names)
+    save_nwb = True
+    save_raw_movies = False
+    overwrite_nwb = True
+    savedir = '/home/rozmar/Mount/HDD_RAID_2_16TB/GCaMP8_NWB'
+    nwb_output_dir = savedir
+    institution = 'Janelia Research Campus'
+    zero_zero_time = datetime.strptime('00:00:00', '%H:%M:%S').time()  # no precise time available
+    session_description = {'related_publications':'10.25378/janelia.13148243',#publication DOI comes here
+                           'experiment_description':'Simultaneous GCaMP8 imaging and cell-attached electrophysiology recordings of primary visual cortex layer 2 pyramidal cells and interneurons in vivo during drifting gratings visual stimulation',
+                           'keywords':['GCaMP', 'GECI', 'cell attached electrophysiology','GCaMP8', 'extracellular electrophysiology','visual stimulation'],
+                           }
+     
+    sensor_name_translator = {'456': 'jGCaMP8f',
+                              '686': 'jGCaMP8m',
+                              '688': 'jGCaMP8s',
+                              'GCaMP7F': 'jGCaMP7f',
+                              'XCaMPgf': 'XCaMPgf'}
+    roi_crit = {'channel_number':1,
+                'motion_correction_method':'Suite2P',
+                'roi_type':'Suite2P',
+                'neuropil_number':1}
+    max_sweep_ap_hw_std_per_median =  .2
+    min_sweep_ap_snr_dv_median = 10
+    #minimum_f0_value = 20 # when the neuropil is bright, the F0 can go negative after neuropil subtraction
+    min_channel_offset = 100 # PMT error
+    ephys_quality_crit_1 = 'sweep_ap_snr_dv_median>={}'.format(min_sweep_ap_snr_dv_median)
+    ephys_quality_crit_2 = 'sweep_ap_hw_std_per_median<={}'.format(max_sweep_ap_hw_std_per_median)
+    #baseline_f_crit = 'cawave_baseline_f > {}'.format(minimum_f0_value)
+    channel_offset_crit = 'channel_offset > {}'.format(min_channel_offset)
+    
+    calcium_sensors = np.unique(imaging_gt.SessionCalciumSensor().fetch('session_calcium_sensor'))
+    for sensor in calcium_sensors:
+        sensor_crit = 'session_calcium_sensor="{}"'.format(sensor)
+        movies_all = (imaging.MovieChannel()*ephysanal_cell_attached.SweepAPQC()*imaging_gt.SessionCalciumSensor()*imaging_gt.MovieCalciumWaveSNR() & sensor_crit&ephys_quality_crit_1&ephys_quality_crit_2&channel_offset_crit)
+        subject_ids = np.unique(movies_all.fetch('subject_id'))
+        for subject_id in subject_ids:
+            subject_crit = 'subject_id = {}'.format(subject_id)
+            cell_numbers = np.unique((movies_all*imaging_gt.ROISweepCorrespondance() & subject_crit).fetch('cell_number'))
+            
+            for cell_i,cell_number in enumerate(cell_numbers):
+                
+                if 'anm{}_cell{}'.format(subject_id,cell_number) in bad_cell_blacklist:
+                    print('anm{}_cell{} on blacklist, skipped'.format(subject_id,cell_number))
+                    continue
+                        
+                cell_crit = 'cell_number = {}'.format(cell_number)
+                this_session = (imaging_gt.SessionCalciumSensor()*experiment.Session & subject_crit).fetch1()
+                cell_start_time =(ephys_cell_attached.Cell()&subject_crit&cell_crit).fetch1('cell_recording_start')
+                alexa_concentration = int((ephys_cell_attached.SessionPipetteFill()&this_session).fetch1('dye_concentration'))
+                # -- session / cell
+                nwbfile = NWBFile(identifier='_'.join([sensor_name_translator[this_session['session_calcium_sensor']],'ANM' + str(this_session['subject_id']),'cell'+str(cell_i+1).zfill(2)]),
+                                  session_description='',
+                                  session_start_time=datetime.combine(this_session['session_date'],(datetime.min + cell_start_time).time()), # this is the recording start of the given cell #datetime.combine(this_session['session_date'], zero_zero_time),
+                                  file_create_date=datetime.now(tzlocal()),
+                                  experimenter=this_session['username'],
+                                  institution=institution,
+                                  experiment_description=session_description['experiment_description'],
+                                  related_publications=session_description['related_publications'],
+                                  keywords=session_description['keywords'])
+                device = nwbfile.create_device(name='MMIMS: custom-built two-photon microscope with a resonant scanner')
+                device_ephys = nwbfile.create_device(name='Multiclamp 700B',manufacturer = 'Axon Instruments',description = 'with 20 kHz low-pass filter')
+                electrode = nwbfile.create_icephys_electrode(name='Micropipette',
+                                                        description='Micropipette (3–9 MOhm) filled with sterile saline containing {} micromolar AlexaFluor 594'.format(alexa_concentration),
+                                                        device=device_ephys)
+                subj = (lab.Subject & subject_crit).fetch1()
+                # -- subject
+                nwbfile.subject = pynwb.file.Subject(subject_id=str(this_session['subject_id']),
+                                                     description=f'source: JAX; strains: Bl/6',
+                                                     sex=subj['sex'],
+                                                     species='mus musculus',
+                                                     date_of_birth=datetime.combine(subj['date_of_birth'], zero_zero_time) if subj['date_of_birth'] else None)
+                
+                # -- virus
+                nwbfile.virus = json.dumps([{k: str(v) for k, v in virus_injection.items() if k not in subj}
+                                            for virus_injection in lab.Surgery.VirusInjection * lab.Virus & subject_crit])
+                
+                
+                
+                celltype = (ephysanal_cell_attached.EphysCellType()& subject_crit & cell_crit).fetch1('ephys_cell_type')
+                
+                #%
+                cell_movies = movies_all*imaging_gt.ROISweepCorrespondance() & subject_crit & cell_crit# &'sweep_number = 2'
+                
+                snrs,movie_numbers,movie_total_ap_nums = cell_movies.fetch('movie_median_cawave_snr_per_ap','movie_number','movie_total_ap_num')
+    #%
+                
+                columns_ap_table = [{'name': 'ap_time',
+                                     'description':'peak time of detected loose-seal action potential'},
+                                    {'name': 'ap_snr',
+                                     'description':'signal to noise ratio of detected loose-seal action potential'}]
 
+                ap_metadata_table = pynwb.icephys.IntracellularResponsesTable(columns = columns_ap_table,
+                                                                              colnames = ['ap_time','ap_snr']
+                                                                               )
+    
+                movie_numbers = np.unique(movie_numbers) # there is a stupid bug where a movie is duplicated
+                ap_times_list = []
+                ap_snrs_list = []
+                movie_length_list = []
+                recording_mode_list = []
+                for movie_i,movie_number in enumerate(movie_numbers):
+                    if 'anm{}_cell{}_movie{}'.format(subject_id,cell_number,movie_number) in bad_movie_blacklist:
+                        continue
+                    movie_crit = {'subject_id':subject_id,
+                                  'movie_number': movie_number}
+                    sweep_crit = movie_crit.copy()
+                    time_stamps  = (imaging.MovieFrameTimes()&movie_crit).fetch1('frame_times')-cell_start_time.total_seconds()+this_session['session_time'].total_seconds()
+                    movie_length_list.append(time_stamps[-1]-time_stamps[0])
+                    starting_time = time_stamps[0]
+                    rate = 1/np.mean(np.diff(time_stamps))
+                    movie_x_size,movie_y_size = (imaging.Movie()&movie_crit).fetch1('movie_x_size','movie_y_size')
+                    roi_nums = (imaging.ROI()&movie_crit&roi_crit).fetch('roi_number')
+                    try:
+                        recorded_roi_num = (imaging_gt.ROISweepCorrespondance*imaging.ROI()&movie_crit&roi_crit).fetch1('roi_number')
+                    except: # stupid bug where multiple sweeps are connected to a single recording
+                        #%
+                        print('multiple sweeps for a movie..')
+                        recorded_roi_nums_,sweep_nums_,sweep_start_times_ = (ephys_cell_attached.Sweep()*imaging_gt.ROISweepCorrespondance*imaging.ROI()&sweep_crit&roi_crit).fetch('roi_number','sweep_number','sweep_start_time')
+                        if not any(np.abs(np.asarray(sweep_start_times_,float)-starting_time)<1):
+                            print('correct sweep not found, skipping')
+                            break
+                        sweep_needed = sweep_nums_[np.abs(np.asarray(sweep_start_times_,float)-starting_time)<1][0]
+                        sweep_crit['sweep_number'] = sweep_needed
+                        recorded_roi_num = (imaging_gt.ROISweepCorrespondance*imaging.ROI()&sweep_crit&roi_crit).fetch1('roi_number')
+                        
+                    roi_nums = np.concatenate([[recorded_roi_num],roi_nums[roi_nums!=recorded_roi_num]]) # first ROI will be the recorded one
+                    movie_dirs_raw,movie_names_raw = (imaging.MovieFile()&movie_crit).fetch('movie_file_directory','movie_file_name')
+                    raw_file_list_source = []
+                    raw_file_list = []
+                    raw_file_list_nwb = []
+                    
+                    Path(os.path.join(savedir,'movie_raw',nwbfile.identifier,'movie_{}'.format(str(movie_i).zfill(3)))).mkdir(parents=True, exist_ok=True)
+                    for file_i,(dir_now,name_now) in enumerate(zip(movie_dirs_raw,movie_names_raw)):
+                        raw_file_list_source.append(os.path.join(source_dir_base,dir_now,name_now))
+                        raw_file_list.append(os.path.join(savedir,'movie_raw',nwbfile.identifier,'movie_{}'.format(str(movie_i).zfill(3)),'raw_{}.tif'.format(str(file_i).zfill(3))))
+                        raw_file_list_nwb.append(os.path.join('movie_raw',nwbfile.identifier,'movie_{}'.format(str(movie_i).zfill(3)),'raw_{}.tif'.format(str(file_i).zfill(3))))
+                        if save_raw_movies and not os.path.exists(raw_file_list[-1]):
+                            shutil.copyfile(raw_file_list_source[-1],raw_file_list[-1])
+                        
+                    
+                    mean_image_ch1 = (imaging.RegisteredMovieImage()&movie_crit&'channel_number = 1').fetch1('registered_movie_mean_image')
+                    mean_image_ch2 = (imaging.RegisteredMovieImage()&movie_crit&'channel_number = 2').fetch1('registered_movie_mean_image')
+                    pixel_size = float((imaging.Movie()&movie_crit).fetch1('movie_pixel_size'))
+                    depth = (imaging_gt.MovieDepth()&movie_crit).fetch1('movie_depth')
+                    #%
+                    # ===============================================================================
+                    # ======================== IMAGING & SEGMENTATION ===============================
+                    # ===============================================================================
+                
+                    # ---- Structural Images ----------
+                    images = pynwb.base.Images(name='mean images of movie {}'.format(movie_i), description='Structural images of a scanning')
+                    gcamp = pynwb.image.GrayscaleImage('{} at 940nm'.format(sensor_name_translator[this_session['session_calcium_sensor']]), mean_image_ch1)
+                    alexa = pynwb.image.GrayscaleImage('Alexa Fluor 594 in pipette', mean_image_ch2)
+                    images.add_image(gcamp)
+                    images.add_image(alexa)
+                    nwbfile.add_acquisition(images)
+                
+                    
+                #%
+                    imaging_plane = nwbfile.create_imaging_plane(
+                            name='Movie_{}'.format(movie_i),
+                            optical_channel=pynwb.ophys.OpticalChannel(
+                                    name='green', description='Emission filter 525/50', emission_lambda=525.),
+                            description='Simultaneous loose-seal recording and calcium imaging in V1',
+                            device=device,
+                            excitation_lambda=940.,
+                            imaging_rate=rate,
+                            indicator=sensor_name_translator[this_session['session_calcium_sensor']],
+                            location='V1',
+                            grid_spacing=[pixel_size, pixel_size],
+                            grid_spacing_unit='micrometers',
+                            reference_frame = 'surface of the cortex',
+                            origin_coords = [0,0,depth],
+                            origin_coords_unit = 'micrometers')
+                    
+                            
+                    # TwoPhotonSeries (raw movie), 
+                    raw_movie = pynwb.ophys.TwoPhotonSeries(name='Raw movie {}'.format(movie_i),
+                                                            dimension=[int(movie_x_size), int(movie_y_size)],
+                                                            external_file=raw_file_list_nwb,
+                                                            imaging_plane=imaging_plane,
+                                                            starting_frame=[0],
+                                                            format='external',
+                                                            starting_time=starting_time,
+                                                            rate=rate)
+                    nwbfile.add_acquisition(raw_movie)
+                    # NEED to add : CorrectedImageStack (registered movie)
+                    # NEED to add : MotionCorrection
+                    # NEED to add : ?? power post objective, 
+                #%
+                    # ----- Segementation information -----
+                    # link the imaging segmentation to the nwb file
+                    ophys = nwbfile.create_processing_module('ophys of movie {}'.format(movie_i), 'Processing result of imaging')
+                    img_seg = pynwb.ophys.ImageSegmentation()
+                    ophys.add(img_seg)
+                
+                    pln_seg = img_seg.create_plane_segmentation(
+                            name='MovieSegmentation',
+                            description='output from segmenting with Suite2p, first ROI is the neuron recorded with electrophysiology',
+                            imaging_plane=imaging_plane)
+                
+                    roi_fluorescence = pynwb.ophys.Fluorescence()
+                    ophys.add(roi_fluorescence)
+
+                    for k, v in dict(
+                        cell_type='pyr for putative pyramidal cells, int for putative interneurons, based on average loose-seal spike shape',
+                        neuropil_mask='mask of neuropil surrounding this roi',
+                        recorded_with_ephys='whether this ROI is simultaneously loose-seal recorded'
+                        ).items():
+                        pln_seg.add_column(name=k, description=v)
+                #%
+                    
+                    #%
+                    roi_f_list = []
+                    neuropil_f_list = []
+                    for roi_i,roi_num in enumerate(roi_nums):
+                        roi_properties_needed = ['roi_f',
+                                                 'neuropil_f',
+                                                 'neuropil_xpix',
+                                                 'neuropil_ypix',
+                                                 'roi_xpix',
+                                                 'roi_ypix',
+                                                 'roi_weights']
+                        roi_data = dict()
+                        roi_properties_list = (imaging.ROITrace()*imaging.ROINeuropilTrace()*imaging.ROINeuropil()*imaging.ROI()&movie_crit&roi_crit&'roi_number = {}'.format(roi_num)).fetch1(*roi_properties_needed)
+                        for data,data_name in zip(roi_properties_list,roi_properties_needed):
+                            roi_data[data_name] = data 
+                        roi_f_list.append(roi_data['roi_f'])
+                        neuropil_f_list.append(roi_data['neuropil_f'])
+                        
+                        mask = np.zeros(mean_image_ch1.shape)
+                        mask[roi_data['roi_ypix'],roi_data['roi_xpix']] = roi_data['roi_weights']/np.sum(roi_data['roi_weights'])
+                        neuropil_mask = np.zeros(mean_image_ch1.shape)
+                        neuropil_mask[roi_data['neuropil_ypix'],roi_data['neuropil_xpix']] = 1
+                        neuropil_mask = neuropil_mask/np.sum(neuropil_mask)
+                    #%
+                        pln_seg.add_roi(
+                            image_mask=mask,#.astype(bool),
+                            neuropil_mask=neuropil_mask.astype(bool),
+                            cell_type=celltype if roi_i == 0 else 'unknown',
+                            recorded_with_ephys=True if roi_i == 0 else False)
+                
+                    roi_region = pln_seg.create_roi_table_region(
+                            name='rois',
+                            description='table region for rois in this segmentation',
+                            region=list(range(roi_i)))
+#%
+                    roi_fluorescence.create_roi_response_series(
+                            name='RoiResponseSeries',
+                            data=np.squeeze(np.array(roi_f_list)),
+                            description='weighted average fluorescence of roi',
+                            rois=roi_region,
+                            unit='a.u.',
+                            starting_time=starting_time, 
+                            rate=rate)
+                    roi_fluorescence.create_roi_response_series(
+                        name='NeuropilResponseSeries',
+                        data=np.squeeze(np.array(neuropil_f_list)),
+                        description='average fluorescence of the neuropil surrounding the roi',
+                        rois=roi_region,
+                        unit='a.u.',
+                        starting_time=starting_time, 
+                        rate=rate)
+                    
+                    
+                    # loose-seal recording
+                    #%
+                    recording_mode,sweep_start_time,sample_rate = (ephys_cell_attached.Sweep()*ephys_cell_attached.SweepMetadata()*imaging_gt.ROISweepCorrespondance&sweep_crit).fetch1('recording_mode','sweep_start_time','sample_rate')
+                    sample_rate = float(sample_rate)
+                    response_trace, response_unit = (ephys_cell_attached.SweepResponse()*imaging_gt.ROISweepCorrespondance&sweep_crit).fetch1('response_trace','response_units')
+                    try:
+                        stim_trace, stim_unit = (ephys_cell_attached.SweepStimulus()*imaging_gt.ROISweepCorrespondance&sweep_crit).fetch1('stimulus_trace','stimulus_units')
+                    except:
+                        stim_trace = []
+                        print('no stimulus for this recording')
+                        pass
+                        
+                    #%
+                    recording_mode_list.append(recording_mode)
+                    if recording_mode == 'current clamp':
+                        response = pynwb.icephys.CurrentClampSeries(name='loose seal recording for movie {}'.format(movie_i),
+                                                                    data=response_trace,
+                                                                    conversion=1., 
+                                                                    resolution=np.nan, 
+                                                                    starting_time=float(sweep_start_time), 
+                                                                    rate=sample_rate,
+                                                                    electrode=electrode, 
+                                                                    gain=0.02, 
+                                                                    bias_current=0., 
+                                                                    bridge_balance=0.,
+                                                                    capacitance_compensation=0., 
+                                                                    sweep_number=movie_i)
+                        nwbfile.add_acquisition(response, use_sweep_table=True)
+                        if len(stim_trace)>0:
+                            stimulus = pynwb.icephys.CurrentClampStimulusSeries(name='loose seal stimulus for movie {}'.format(movie_i),
+                                                                                data=stim_trace, 
+                                                                                starting_time=float(sweep_start_time),
+                                                                                rate=sample_rate, 
+                                                                                electrode=electrode, 
+                                                                                gain=0.03, 
+                                                                                sweep_number=movie_i)
+                            nwbfile.add_acquisition(stimulus, use_sweep_table=True)
+                            
+                    elif recording_mode == 'voltage clamp':
+                        response = pynwb.icephys.VoltageClampSeries(name='loose seal recording for movie {}'.format(movie_i), 
+                                                                    data=response_trace,
+                                                                    conversion=1., 
+                                                                    resolution=np.nan, 
+                                                                    starting_time=float(sweep_start_time), 
+                                                                    rate=sample_rate,
+                                                                    electrode=electrode, 
+                                                                    gain=0.02, 
+                                                                    capacitance_slow=0., 
+                                                                    resistance_comp_correction=0.,
+                                                                    sweep_number=movie_i)
+                        nwbfile.add_acquisition(response, use_sweep_table=True)
+                        if len(stim_trace)>0:
+                            stimulus = pynwb.icephys.VoltageClampStimulusSeries(name='loose seal stimulus for movie {}'.format(movie_i),
+                                                                                data=stim_trace, 
+                                                                                starting_time=float(sweep_start_time),
+                                                                                rate=sample_rate, 
+                                                                                electrode=electrode, 
+                                                                                gain=0.03, 
+                                                                                sweep_number=movie_i)
+                            nwbfile.add_acquisition(stimulus, use_sweep_table=True)
+                    else:
+                        print('unknown recording mode')
+                        
+                    #%
+                    ap_times, ap_snrs,ap_indices = (imaging_gt.ROISweepCorrespondance()*ephysanal_cell_attached.ActionPotential()&sweep_crit).fetch('ap_max_time','ap_snr_v','ap_max_index')
+                    ap_times = np.asarray(ap_times,float)+float(sweep_start_time)
+                    
+                    for ap_time,ap_snr,ap_idx in zip(ap_times, ap_snrs,ap_indices):
+                        ap_metadata_table.add_row({'ap_time':ap_time,'ap_snr':ap_snr,'response':pynwb.base.TimeSeriesReference(idx_start = ap_idx,count = 1,timeseries = response)})
+                    
+                    ap_times_list.append(ap_times)
+                    ap_snrs_list.append(ap_snrs)
+                nwbfile.add_analysis(ap_metadata_table)
+                ap_times_all = np.concatenate(ap_times_list)
+                ap_snrs_all = np.concatenate(ap_snrs_list)
+                
+                # TODO add action potentials, don't know how to do it
+                
+                 
+                trial_columns = [{'name': 'angle',
+                                  'description':'angle of drifting grating stimulus in degrees'},
+                                 {'name': 'cycles_per_second',
+                                  'description':'cycles per second of drifting grating stimulus'},
+                                 {'name': 'cycles_per_degree',
+                                  'description':'cycles per degree of drifting grating stimulus'},
+                                 {'name': 'amplitude',
+                                  'description':'amplitude of drifting grating stimulus'},                        
+                        ]
+        
+                # Add new table columns to nwb trial-table for trial-label
+                for c in trial_columns:
+                    nwbfile.add_trial_column(**c)
+                    #%
+                sweep_start_times,sweep_end_times = (ephys_cell_attached.Sweep()&cell_crit&this_session).fetch('sweep_start_time','sweep_end_time')
+                cell_time_edges = np.asarray([np.min(sweep_start_times),np.max(sweep_end_times)],float) + cell_start_time.total_seconds()-this_session['session_time'].total_seconds()
+                trials_needed = experiment.VisualStimTrial()&this_session&'visual_stim_grating_start > {}'.format(cell_time_edges[0])&'visual_stim_grating_start < {}'.format(cell_time_edges[1])
+                
+                #%
+                # Add entry to the trial-table
+                for trial_dj in trials_needed:
+                    
+                    #%
+                    trial = {}
+                    trial['start_time'] =float(trial_dj['visual_stim_grating_start']) -cell_start_time.total_seconds()+this_session['session_time'].total_seconds()
+                    trial['stop_time'] = float(trial_dj['visual_stim_grating_end']) -cell_start_time.total_seconds()+this_session['session_time'].total_seconds()
+                    trial['angle'] = trial_dj['visual_stim_grating_angle']
+                    trial['cycles_per_second'] = trial_dj['visual_stim_grating_cyclespersecond']
+                    trial['cycles_per_degree'] = trial_dj['visual_stim_grating_cyclesperdegree']
+                    trial['amplitude'] = trial_dj['visual_stim_grating_amplitude']
+                    
+                    nwbfile.add_trial(**trial)
+                
+                #%
+                metadata_dict_now= {'Calcium Sensor':sensor_name_translator[this_session['session_calcium_sensor']],
+                                    'Subject ID':'anm{}'.format(subject_id),
+                                    'Cell number':cell_i,
+                                    'Putative cell type':celltype,
+                                    'Total recording length':round(sum(movie_length_list),2),
+                                    'Recording mode':' & '.join(np.unique(recording_mode_list)),
+                                    'Total action potential number':len(ap_times_all),
+                                    'Median action potential signal-to-noise ratio':round(np.median(ap_snrs_all),2)}
+                metadata_table = metadata_table.append(metadata_dict_now, ignore_index=True)
+                metadata_table.to_csv(os.path.join(savedir,'summary_data.csv'))
+# =============================================================================
+#                 #%
+#                 
+#                 #%
+#                     #%
+#                     #break
+#                 break
+#             break
+#         break
+#     #break
+#                     #%
+# =============================================================================
+                    
+                    
+                    
+                    
+                    
+                    
+                # =============== Write NWB 2.0 file ===============
+                if save_nwb:
+                    save_file_name = ''.join([nwbfile.identifier, '.nwb'])
+                    if not os.path.exists(nwb_output_dir):
+                        os.makedirs(nwb_output_dir)
+                    if overwrite_nwb or not os.path.exists(os.path.join(nwb_output_dir, save_file_name)):
+                        with NWBHDF5IO(os.path.join(nwb_output_dir, save_file_name), mode='w') as io:
+                            io.write(nwbfile)
+                            print(f'Write NWB 2.0 file: {save_file_name}')
+            
+                #return nwbfile
+
+
+    
+                    #%%
+                    
 def export_movies_with_metadata():
     #%% export traces for s2f
     # this script locates the cells with highest snr for each sensor, then exports the first n cells or m movies, whichever comes first
     lfp_neuropil_xcorr_max_threshold = 2500 #
     overwrite = True
+    
     sensors_to_export = ['686','688']
     sensor_names = {'686':'jGCaMP8m',
                     '688':'jGCaMP8s'}
