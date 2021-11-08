@@ -8,15 +8,38 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import json
+import tifffile as tf
+from pathlib import Path
+#%% merge RFP and GFP channels for ilastik pipeline
+def merge_rfp_gfp_for_ilastik():
+    anatomy_base_dir = '/home/rozmar/Data/Anatomy/cropped_rotated'
+    output_base_dir = '/home/rozmar/Data/Anatomy/ilastik/raw'
+    for dirname in os.listdir(anatomy_base_dir):
+        if '.' in dirname or 'anm' not in dirname or '20x' not in dirname:
+            continue
+        dest_dir = os.path.join(output_base_dir,dirname)
+        Path(dest_dir).mkdir(parents=True, exist_ok=True)
+        rfp_files = np.sort(os.listdir(os.path.join(anatomy_base_dir,dirname,'RFP')))
+        fitc_files = np.sort(os.listdir(os.path.join(anatomy_base_dir,dirname,'FITC')))
+        for rfp_file,fitc_file in zip(rfp_files,fitc_files):
+            R = tf.imread(os.path.join(anatomy_base_dir,dirname,'RFP',rfp_file))
+            G = tf.imread(os.path.join(anatomy_base_dir,dirname,'FITC',fitc_file))
+            I = np.stack([R,G])
+            fname = rfp_file[:rfp_file.find('RFP')]+'RFP_FITC'+rfp_file[rfp_file.find('RFP')+3:rfp_file.find('.')]+'.tif'
+            tf.imsave(os.path.join(dest_dir,fname),I,imagej=True,metadata={'Composite mode': 'composite'})
+            #break
+        #break
 
+#%%
 
-def filter_anatomy_images_find_injection_sites():
+def filter_anatomy_images_find_injection_sites(magnification = '10x'):
+    #%%
     anatomy_base_dir = '/home/rozmar/Data/Anatomy/cropped_rotated'
     save_base_dir = '/home/rozmar/Data/Anatomy/filtered'
     anatomy_metadata = pd.read_csv("/home/rozmar/Data/Anatomy/Metadata/experiments.csv")
     sigma_gauss_microns = 50 # microns 
     minimum_horizontal_separation_microns = 250#500 for 20x
-    jsonfilename = '10x_{}sigma.json'
+    jsonfilename = magnification+'_{}sigma.json'
     #orverwrite = True
     dirs_ = os.listdir(anatomy_base_dir)
     subject_ids = list()
@@ -32,7 +55,7 @@ def filter_anatomy_images_find_injection_sites():
         pixel_size = anatomy_metadata['pixel size of export'][metadata_idx]
         sigma_gauss = sigma_gauss_microns/pixel_size
         minimum_horizontal_separation = minimum_horizontal_separation_microns/pixel_size
-        if '20x' in subject_dir:
+        if magnification not in subject_dir:
             continue # only 20x images
     # =============================================================================
     #     if os.path.exists(os.path.join(save_base_dir,basename+str(z)+'.jpg')) and not orverwrite:
@@ -168,16 +191,17 @@ def filter_anatomy_images_find_injection_sites():
     jsonfile = os.path.join(save_base_dir,jsonfilename.format(sigma_gauss_microns))
     with open(jsonfile, 'w') as outfile:
         json.dump(peak_data, outfile, indent=4)        
-     
+    #%% 
         
-def digest_anatomy_json_file():
-    jsonfile = os.path.join(dj.config['locations.mr_share'],'Data/Anatomy/filtered/10x_50sigma.json')
+def digest_anatomy_json_file(magnification = '10x',plotit = True):
+    #%%
+    jsonfile = os.path.join(dj.config['locations.mr_share'],'Data/Anatomy/filtered/{}_50sigma.json'.format(magnification))
     with open(jsonfile, "r") as read_file:
         peak_data = json.load(read_file)
     
     minimum_horizontal_separation_microns = 400
-    
-    fig_peaks = plt.figure()
+    if plotit:
+        fig_peaks = plt.figure()
     
     injection_site_dict = {'sensor':list(),
                            'subject':list(),
@@ -195,7 +219,7 @@ def digest_anatomy_json_file():
         sensor = (imaging_gt.SessionCalciumSensor()&'subject_id = {}'.format(subject)).fetch1('session_calcium_sensor')
         ml,ap = (lab.Surgery.VirusInjection()&'subject_id = {}'.format(subject)).fetch('ml_location','ap_location')
         injection_number = np.unique(np.asarray([ml,ap],float),axis = 1).shape[1]
-        minimum_horizontal_separation_microns = float(np.mean(np.diff(np.unique(ap))))*.8
+        minimum_horizontal_separation_microns = float(np.mean(np.diff(np.unique(ap))))*.6
         #%
         peak_data_now = peak_data[sample]
         
@@ -230,19 +254,20 @@ def digest_anatomy_json_file():
         for k in peak_data_new.keys():
             peak_data_new[k] = np.asarray(peak_data_new[k])
         #
-        if sample_i ==0:
-            ax_now = fig_peaks.add_subplot(3,4,sample_i+1)
-            ax_now_twin=ax_now.twinx()
-            ax_first = ax_now
-            #ax_first_twin = ax_now_twin
-        else:
-            ax_now = fig_peaks.add_subplot(3,4,sample_i+1,sharey = ax_first)
-            ax_now_twin=ax_now.twinx()
-            #plt.axes(ax_now_twin, sharey = ax_first_twin)
-        ax_now.plot( peak_data_new['z'],peak_data_new['peak_values_rfp_1'],'r-')
-        ax_now.plot( peak_data_new['z'],peak_data_new['peak_values_rfp_2'],'k-')
-        ax_now_twin.plot( peak_data_new['z'],peak_data_new['peak_values_fitc_1'],'g-')
-        ax_now_twin.plot( peak_data_new['z'],peak_data_new['peak_values_fitc_2'],'b-')
+        if plotit:
+            if sample_i ==0:
+                ax_now = fig_peaks.add_subplot(3,4,sample_i+1)
+                ax_now_twin=ax_now.twinx()
+                ax_first = ax_now
+                #ax_first_twin = ax_now_twin
+            else:
+                ax_now = fig_peaks.add_subplot(3,4,sample_i+1,sharey = ax_first)
+                ax_now_twin=ax_now.twinx()
+                #plt.axes(ax_now_twin, sharey = ax_first_twin)
+            ax_now.plot( peak_data_new['z'],peak_data_new['peak_values_rfp_1'],'r-')
+            ax_now.plot( peak_data_new['z'],peak_data_new['peak_values_rfp_2'],'k-')
+            ax_now_twin.plot( peak_data_new['z'],peak_data_new['peak_values_fitc_1'],'g-')
+            ax_now_twin.plot( peak_data_new['z'],peak_data_new['peak_values_fitc_2'],'b-')
         
         
         rfp_concatenated = np.concatenate([peak_data_new['peak_values_rfp_1'],peak_data_new['peak_values_rfp_2']])
@@ -267,19 +292,19 @@ def digest_anatomy_json_file():
             injection_site_dict['RFP'].append(peak_data_new['peak_values_rfp_{}'.format(side)][idx_real])
             injection_site_dict['FITC'].append(peak_data_new['peak_values_fitc_{}'.format(side)][idx_real])
             injection_site_dict['filename'].append(peak_data_new['filename'][idx_real])
-            
-            ax_now.plot( peak_data_new['z'][idx_real],peak_data_new['peak_values_rfp_{}'.format(side)][idx_real],'ro')
+            if plotit:
+                ax_now.plot( peak_data_new['z'][idx_real],peak_data_new['peak_values_rfp_{}'.format(side)][idx_real],'ro')
             
             
             todel = (z_concatenated>=z_concatenated[max_idx]-minimum_horizontal_separation_microns) & (z_concatenated<=z_concatenated[max_idx]+minimum_horizontal_separation_microns)
             rfp_concatenated[todel]=0
             
         
-            
-        ax_now.set_title(sample)       
+        if plotit:    
+            ax_now.set_title(sample)       
     
         print('{}- {} injections, minimum separation enforced: {} microns'.format(subject,injection_number,minimum_horizontal_separation_microns))
-         
+      #%%   
     return injection_site_dict
     
 def export_in_vivo_brightnesses():
@@ -338,3 +363,67 @@ def export_in_vivo_brightnesses():
                 sensor_neuropil_to_roi[sensor].append(neuropil_f_min_corr/f_corr)      
                 sensor_expression_time[sensor].append(session_sensor_expression_time)
     return sensor_f_corrs
+
+def export_ilastik_data():
+    sensor_translator = {'XCaMP':'XCaMPgf', 
+                         'UF456':'456', 
+                         'G7F':'GCaMP7F', 
+                         'UF686':'686', 
+                         'UF688':'688'}
+    ilastik_batch_dir = '/home/rozmar/Data/Anatomy/ilastik/raw/batch'
+    anatomy_metadata = pd.read_csv("/home/rozmar/Data/Anatomy/Metadata/experiments.csv")
+    injection_site_dict = digest_anatomy_json_file(plotit = False)
+    ilastik_data_all = []
+    slice_id = 0
+    slice_data_all = []
+    for brain in anatomy_metadata.iterrows():
+        brain = brain[1]
+        if '20x' not in brain['Spreadsheet ID']:
+            continue
+        brain_metadata = pd.read_csv("/home/rozmar/Data/Anatomy/Metadata/{}.csv".format(brain['Spreadsheet ID']))
+        injection_idx = (np.asarray(injection_site_dict['subject'],int)==brain['ID'])
+        injection_Z = np.asarray(injection_site_dict['Z'])[injection_idx]
+        for section in brain_metadata.iterrows():
+            section = section[1]
+            
+            #%
+            unique_inj_zs = np.unique(injection_Z)
+            while any(np.diff(unique_inj_zs)<150):
+                idx_now = np.argmax(np.diff(unique_inj_zs)<150)
+                unique_inj_zs[idx_now:idx_now+2] = int((np.mean(unique_inj_zs[idx_now:idx_now+2]))/50)*50
+                unique_inj_zs = np.unique(unique_inj_zs)
+            z_to_injection = np.floor((np.min(np.abs(unique_inj_zs - section['Z location'])))/100)*100+50
+            object_filename = brain['Spreadsheet ID'] +'_RFP_FITC_Z_{}_table.csv'.format(str(int(section['Z location'])).zfill(6))
+            ilastik_data = pd.read_csv(os.path.join(ilastik_batch_dir,'objects',object_filename))    
+            slice_id+=1
+            if len(ilastik_data)>0:
+                ilastik_data['sensor'] = sensor_translator[brain['sensor']]
+                ilastik_data['z_to_injection'] = z_to_injection
+                ilastik_data['section_z'] = str(int(section['Z location'])).zfill(6)
+                ilastik_data['exp_name'] = brain['Spreadsheet ID']
+                ilastik_data['slice_id'] = slice_id
+                if len(ilastik_data_all) == 0:
+                    ilastik_data_all = ilastik_data
+                    
+                else:
+                    ilastik_data_all = pd.concat([ilastik_data_all,ilastik_data], ignore_index=True)
+                    #break
+                good_cell_num = (ilastik_data['Predicted Class']=='Good Cell').sum()+(ilastik_data['Predicted Class']=='2 good cells').sum()*2+(ilastik_data['Predicted Class']=='2 mixed cells').sum() + (ilastik_data['Predicted Class']=='3+ good cells').sum()*3
+                filled_cell_num = (ilastik_data['Predicted Class']=='Filled').sum()+(ilastik_data['Predicted Class']=='2 filled cells').sum()*2+(ilastik_data['Predicted Class']=='2 mixed cells').sum()
+                dict_now = {'sensor':sensor_translator[brain['sensor']],
+                            'z_to_injection': z_to_injection,
+                            'good_cell_num':good_cell_num,
+                            'filled_cell_num':filled_cell_num,
+                            'cell_num':filled_cell_num+good_cell_num,
+                            'filled_cell_ratio':filled_cell_num/(filled_cell_num+good_cell_num),
+                            'brain_name':brain['Spreadsheet ID'],
+                            'section_z':str(int(section['Z location'])).zfill(6),
+                            }
+                slice_data_now = pd.Series(dict_now)
+                if len(slice_data_all) == 0:
+                    slice_data_all = slice_data_now
+                else:
+                    slice_data_all = pd.concat([slice_data_all,slice_data_now], axis=1, ignore_index=True)
+                    
+    slice_data_all = slice_data_all.transpose() 
+    return ilastik_data_all,slice_data_all
