@@ -13,6 +13,9 @@ import pynwb
 from pynwb import NWBFile, NWBHDF5IO
 from datetime import datetime
 from dateutil.tz import tzlocal
+from PIL import Image
+from hdmf.backends.hdf5.h5_utils import H5DataIO
+from ScanImageTiffReader import ScanImageTiffReader
 bad_cell_blacklist = ['anm472182_cell3',
                       'anm479120_cell5',
                       'anm479571_cell3',
@@ -33,6 +36,32 @@ bad_movie_blacklist = ['anm479572_cell4_movie15', #wrong ROI
 # for downsampling_factor in [1,2,3,4,5,6,7,8]:
 #     downsample_movies_and_ROIs(downsampling_factor,overwrite = True,only_metadata = False)
 # =============================================================================
+
+def read_tiff(path,ROI_coordinates=None, n_images=100000):
+    """
+    path - Path to the multipage-tiff file
+    n_images - Number of pages in the tiff file
+    """
+    img = Image.open(path)
+
+    images = []
+    #dimensions = np.diff(ROI_coordinates.T).T[0]+1
+    for i in range(10000000):
+        try:
+            img.seek(i)
+            img.getpixel((1, 1))
+            imarray = np.array(img)
+            if ROI_coordinates:
+                slice_ = imarray[ROI_coordinates[0][1]:ROI_coordinates[1][1]+1,ROI_coordinates[0][0]:ROI_coordinates[1][0]+1]
+                images.append(slice_)
+            else:
+                images.append(imarray)
+            
+           # break
+        except EOFError:
+            # Not enough frames in img
+            break
+    return np.array(images)
 #%% downsample movies and ROIs for 
 def downsample_movies_and_ROIs(downsampling_factor = 2,overwrite = False,only_metadata = False):
     #%%
@@ -304,14 +333,18 @@ def NWB_movie_path_and_cell_description_export():
     metadata_table = pd.DataFrame(columns = column_names)
     save_nwb = True
     save_raw_movies = False
-    overwrite_nwb = True
-    savedir = '/home/rozmar/Mount/HDD_RAID_2_16TB/GCaMP8_NWB'
+    save_registered_movies = True
+    overwrite_nwb = False
+    save_movies_as_tif = True
+    savedir = '/home/rozmar/Mount/HDD_RAID_2_16TB/GCaMP8_NWB'#'/home/rozmar/Data/Calcium_imaging/GCaMP8_NWB'#
     nwb_output_dir = savedir
-    institution = 'Janelia Research Campus'
+    
     zero_zero_time = datetime.strptime('00:00:00', '%H:%M:%S').time()  # no precise time available
-    session_description = {'related_publications':'10.25378/janelia.13148243',#publication DOI comes here
+    session_description = {'related_publications':['10.25378/janelia.13148243','10.1101/2021.11.08.467793'],#publication DOI comes here
                            'experiment_description':'Simultaneous GCaMP8 imaging and cell-attached electrophysiology recordings of primary visual cortex layer 2 pyramidal cells and interneurons in vivo during drifting gratings visual stimulation',
                            'keywords':['GCaMP', 'GECI', 'cell attached electrophysiology','GCaMP8', 'extracellular electrophysiology','visual stimulation'],
+                           'lab':'Lab of Karel Svoboda at HHMI Janelia Research Campus',
+                           'institution':'HHMI Janelia Research Campus'
                            }
      
     sensor_name_translator = {'456': 'jGCaMP8f',
@@ -319,6 +352,8 @@ def NWB_movie_path_and_cell_description_export():
                               '688': 'jGCaMP8s',
                               'GCaMP7F': 'jGCaMP7f',
                               'XCaMPgf': 'XCaMPgf'}
+    experimenter_translator = {'rozsam':'Marton Rozsa',
+                               'liangy10':'Yajie Liang'}
     roi_crit = {'channel_number':1,
                 'motion_correction_method':'Suite2P',
                 'roi_type':'Suite2P',
@@ -333,6 +368,7 @@ def NWB_movie_path_and_cell_description_export():
     channel_offset_crit = 'channel_offset > {}'.format(min_channel_offset)
     
     calcium_sensors = np.unique(imaging_gt.SessionCalciumSensor().fetch('session_calcium_sensor'))
+    calcium_sensors = ['688','686']
     for sensor in calcium_sensors:
         sensor_crit = 'session_calcium_sensor="{}"'.format(sensor)
         movies_all = (imaging.MovieChannel()*ephysanal_cell_attached.SweepAPQC()*imaging_gt.SessionCalciumSensor()*imaging_gt.MovieCalciumWaveSNR() & sensor_crit&ephys_quality_crit_1&ephys_quality_crit_2&channel_offset_crit)
@@ -352,15 +388,26 @@ def NWB_movie_path_and_cell_description_export():
                 cell_start_time =(ephys_cell_attached.Cell()&subject_crit&cell_crit).fetch1('cell_recording_start')
                 alexa_concentration = int((ephys_cell_attached.SessionPipetteFill()&this_session).fetch1('dye_concentration'))
                 # -- session / cell
-                nwbfile = NWBFile(identifier='_'.join([sensor_name_translator[this_session['session_calcium_sensor']],'ANM' + str(this_session['subject_id']),'cell'+str(cell_i+1).zfill(2)]),
+                nwbfilename = '_'.join([sensor_name_translator[this_session['session_calcium_sensor']],'ANM' + str(this_session['subject_id']),'cell'+str(cell_i+1).zfill(2)])
+                if os.path.exists(nwb_output_dir):
+                    save_file_name = ''.join([nwbfilename, '.nwb'])
+                    if not overwrite_nwb and os.path.exists(os.path.join(nwb_output_dir, save_file_name)):
+                        print('file already saved: {}'.format(save_file_name))
+                        break
+                            
+                            
+                nwbfile = NWBFile(identifier=nwbfilename,
                                   session_description='',
                                   session_start_time=datetime.combine(this_session['session_date'],(datetime.min + cell_start_time).time()), # this is the recording start of the given cell #datetime.combine(this_session['session_date'], zero_zero_time),
                                   file_create_date=datetime.now(tzlocal()),
-                                  experimenter=this_session['username'],
-                                  institution=institution,
+                                  experimenter=experimenter_translator[this_session['username']],
+                                  institution=session_description['institution'],
+                                  lab = session_description['lab'],
                                   experiment_description=session_description['experiment_description'],
                                   related_publications=session_description['related_publications'],
                                   keywords=session_description['keywords'])
+                nwbfile.session_id = nwbfilename
+                
                 device = nwbfile.create_device(name='MMIMS: custom-built two-photon microscope with a resonant scanner')
                 device_ephys = nwbfile.create_device(name='Multiclamp 700B',manufacturer = 'Axon Instruments',description = 'with 20 kHz low-pass filter')
                 electrode = nwbfile.create_icephys_electrode(name='Micropipette',
@@ -378,7 +425,8 @@ def NWB_movie_path_and_cell_description_export():
                 nwbfile.virus = json.dumps([{k: str(v) for k, v in virus_injection.items() if k not in subj}
                                             for virus_injection in lab.Surgery.VirusInjection * lab.Virus & subject_crit])
                 
-                
+                nwbfile.surgery = json.dumps([{k: str(v) for k, v in surgery.items() if k not in subj}
+                                            for surgery in lab.Surgery() & subject_crit])
                 
                 celltype = (ephysanal_cell_attached.EphysCellType()& subject_crit & cell_crit).fetch1('ephys_cell_type')
                 
@@ -432,19 +480,44 @@ def NWB_movie_path_and_cell_description_export():
                     raw_file_list_source = []
                     raw_file_list = []
                     raw_file_list_nwb = []
-                    
-                    Path(os.path.join(savedir,'movie_raw',nwbfile.identifier,'movie_{}'.format(str(movie_i).zfill(3)))).mkdir(parents=True, exist_ok=True)
-                    for file_i,(dir_now,name_now) in enumerate(zip(movie_dirs_raw,movie_names_raw)):
-                        raw_file_list_source.append(os.path.join(source_dir_base,dir_now,name_now))
-                        raw_file_list.append(os.path.join(savedir,'movie_raw',nwbfile.identifier,'movie_{}'.format(str(movie_i).zfill(3)),'raw_{}.tif'.format(str(file_i).zfill(3))))
-                        raw_file_list_nwb.append(os.path.join('movie_raw',nwbfile.identifier,'movie_{}'.format(str(movie_i).zfill(3)),'raw_{}.tif'.format(str(file_i).zfill(3))))
-                        if save_raw_movies and not os.path.exists(raw_file_list[-1]):
-                            shutil.copyfile(raw_file_list_source[-1],raw_file_list[-1])
+                    if save_raw_movies:
+                        if save_movies_as_tif:
+                            Path(os.path.join(savedir,'movie_raw',nwbfile.identifier,'movie_{}'.format(str(movie_i).zfill(3)))).mkdir(parents=True, exist_ok=True)
+                        for file_i,(dir_now,name_now) in enumerate(zip(movie_dirs_raw,movie_names_raw)):
+                            raw_file_list_source.append(os.path.join(source_dir_base,dir_now,name_now))
+                            raw_file_list.append(os.path.join(savedir,'movie_raw',nwbfile.identifier,'movie_{}'.format(str(movie_i).zfill(3)),'raw_{}.tif'.format(str(file_i).zfill(3))))
+                            raw_file_list_nwb.append(os.path.join('movie_raw',nwbfile.identifier,'movie_{}'.format(str(movie_i).zfill(3)),'raw_{}.tif'.format(str(file_i).zfill(3))))
+                            if save_movies_as_tif:
+                                if save_raw_movies and not os.path.exists(raw_file_list[-1]):
+                                    shutil.copyfile(raw_file_list_source[-1],raw_file_list[-1])
+                                
+                                
+                    movie_dirs_registered,movie_names_registered = (imaging.RegisteredMovieFile()&movie_crit).fetch('reg_movie_file_directory','reg_movie_file_name')
+                    movie_names_registered_list = []
+                    for movie_name in movie_names_registered:
+                        if '.tif' in movie_name:
+                            movie_names_registered_list.append(movie_name)
+                    movie_names_registered = np.asarray(movie_names_registered_list)
+                    reg_file_list_source = []
+                    reg_file_list = []
+                    reg_file_list_nwb = []
+                    if save_registered_movies:
+                        if save_movies_as_tif:
+                            Path(os.path.join(savedir,'movie_registered',nwbfile.identifier,'movie_{}'.format(str(movie_i).zfill(3)))).mkdir(parents=True, exist_ok=True)
+                        for file_i,(dir_now,name_now) in enumerate(zip(movie_dirs_registered,movie_names_registered)):
+                            reg_file_list_source.append(os.path.join(source_dir_base,dir_now,name_now))
+                            reg_file_list.append(os.path.join(savedir,'movie_registered',nwbfile.identifier,'movie_{}'.format(str(movie_i).zfill(3)),'registered_{}.tif'.format(str(file_i).zfill(3))))
+                            reg_file_list_nwb.append(os.path.join('movie_registered',nwbfile.identifier,'movie_{}'.format(str(movie_i).zfill(3)),'registered_{}.tif'.format(str(file_i).zfill(3))))
+                            if save_movies_as_tif:
+                                if save_registered_movies and not os.path.exists(reg_file_list[-1]):
+                                    shutil.copyfile(reg_file_list_source[-1],reg_file_list[-1])
+                                
                         
                     
                     mean_image_ch1 = (imaging.RegisteredMovieImage()&movie_crit&'channel_number = 1').fetch1('registered_movie_mean_image')
                     mean_image_ch2 = (imaging.RegisteredMovieImage()&movie_crit&'channel_number = 2').fetch1('registered_movie_mean_image')
                     pixel_size = float((imaging.Movie()&movie_crit).fetch1('movie_pixel_size'))
+                    line_rate = 1/(imaging.MovieMetaData()&movie_crit).fetch1('movie_hroimanager_lineperiod')
                     depth = (imaging_gt.MovieDepth()&movie_crit).fetch1('movie_depth')
                     #%
                     # ===============================================================================
@@ -457,7 +530,9 @@ def NWB_movie_path_and_cell_description_export():
                     alexa = pynwb.image.GrayscaleImage('Alexa Fluor 594 in pipette', mean_image_ch2)
                     images.add_image(gcamp)
                     images.add_image(alexa)
-                    nwbfile.add_acquisition(images)
+                    #nwbfile.add_acquisition(images)
+                    
+                    # 
                 
                     
                 #%
@@ -479,28 +554,69 @@ def NWB_movie_path_and_cell_description_export():
                     
                             
                     # TwoPhotonSeries (raw movie), 
-                    raw_movie = pynwb.ophys.TwoPhotonSeries(name='Raw movie {}'.format(movie_i),
-                                                            dimension=[int(movie_x_size), int(movie_y_size)],
-                                                            external_file=raw_file_list_nwb,
-                                                            imaging_plane=imaging_plane,
-                                                            starting_frame=[0],
-                                                            format='external',
-                                                            starting_time=starting_time,
-                                                            rate=rate)
-                    nwbfile.add_acquisition(raw_movie)
-                    # NEED to add : CorrectedImageStack (registered movie)
+                    if save_raw_movies:
+                        raw_movie = pynwb.ophys.TwoPhotonSeries(name='Raw movie {}'.format(movie_i),
+                                                                dimension=[int(movie_x_size), int(movie_y_size)],
+                                                                external_file=raw_file_list_nwb,
+                                                                imaging_plane=imaging_plane,
+                                                                starting_frame=[0],
+                                                                format='external',
+                                                                starting_time=starting_time,
+                                                                scan_line_rate = line_rate,
+                                                                timestamps = time_stamps,
+                                                                timestamps_unit = 'seconds',
+                                                                rate=rate)
+                        nwbfile.add_acquisition(raw_movie)
+                    if save_registered_movies:
+# =============================================================================
+#                         reg_movie = pynwb.ophys.TwoPhotonSeries(name='Registered movie {}'.format(movie_i),
+#                                                                 dimension=[int(movie_x_size), int(movie_y_size)],
+#                                                                 external_file=reg_file_list_nwb,
+#                                                                 imaging_plane=imaging_plane,
+#                                                                 starting_frame=[0],
+#                                                                 format='external',
+#                                                                 starting_time=starting_time,
+#                                                                 scan_line_rate = line_rate,
+#                                                                 timestamps = time_stamps,
+#                                                                 timestamps_unit = 'seconds',
+#                                                                 rate=rate)
+# =============================================================================
+                        #%
+                        movie_list = []
+                        for im_now in reg_file_list:
+                            print(im_now)
+                            movie_list.append(ScanImageTiffReader(im_now).data())#read_tiff(im_now)
+                            
+                            #%
+                            #%
+                        movie_reg = np.concatenate(movie_list)
+                        #%
+                        wrapped_data = H5DataIO(data=movie_reg, compression=True)     
+                        reg_movie = pynwb.ophys.TwoPhotonSeries(name='Registered movie {}'.format(movie_i),
+                                                                dimension=[int(movie_x_size), int(movie_y_size)],
+                                                                data = wrapped_data,
+                                                                unit = 'au',
+                                                                imaging_plane=imaging_plane,
+                                                                starting_frame=[0],
+                                                                scan_line_rate = line_rate,
+                                                                timestamps = time_stamps)
+
+                        nwbfile.add_acquisition(reg_movie)
+                        
+                    
                     # NEED to add : MotionCorrection
                     # NEED to add : ?? power post objective, 
                 #%
                     # ----- Segementation information -----
                     # link the imaging segmentation to the nwb file
                     ophys = nwbfile.create_processing_module('ophys of movie {}'.format(movie_i), 'Processing result of imaging')
+                    ophys.add(images)
                     img_seg = pynwb.ophys.ImageSegmentation()
                     ophys.add(img_seg)
                 
                     pln_seg = img_seg.create_plane_segmentation(
                             name='MovieSegmentation',
-                            description='output from segmenting with Suite2p, first ROI is the neuron recorded with electrophysiology',
+                            description='output from segmenting with Suite2p, ROI 0 is the neuron recorded with electrophysiology',
                             imaging_plane=imaging_plane)
                 
                     roi_fluorescence = pynwb.ophys.Fluorescence()
@@ -548,24 +664,26 @@ def NWB_movie_path_and_cell_description_export():
                             name='rois',
                             description='table region for rois in this segmentation',
                             region=list(range(roi_i)))
-#%
-                    roi_fluorescence.create_roi_response_series(
+                    
+                    roiresponseseries = pynwb.ophys.RoiResponseSeries(
                             name='RoiResponseSeries',
                             data=np.squeeze(np.array(roi_f_list)),
                             description='weighted average fluorescence of roi',
                             rois=roi_region,
                             unit='a.u.',
-                            starting_time=starting_time, 
-                            rate=rate)
-                    roi_fluorescence.create_roi_response_series(
+                            timestamps = time_stamps)
+#%
+                    roi_fluorescence.add_roi_response_series(roiresponseseries)
+                    
+                    neuropilresponseseries = pynwb.ophys.RoiResponseSeries(
                         name='NeuropilResponseSeries',
                         data=np.squeeze(np.array(neuropil_f_list)),
                         description='average fluorescence of the neuropil surrounding the roi',
                         rois=roi_region,
                         unit='a.u.',
-                        starting_time=starting_time, 
-                        rate=rate)
+                        timestamps = time_stamps)
                     
+                    roi_fluorescence.add_roi_response_series(neuropilresponseseries)
                     
                     # loose-seal recording
                     #%
@@ -604,6 +722,9 @@ def NWB_movie_path_and_cell_description_export():
                                                                                 gain=0.03, 
                                                                                 sweep_number=movie_i)
                             nwbfile.add_acquisition(stimulus, use_sweep_table=True)
+                            stim_now = True
+                        else:
+                            stim_now = False
                             
                     elif recording_mode == 'voltage clamp':
                         response = pynwb.icephys.VoltageClampSeries(name='loose seal recording for movie {}'.format(movie_i), 
@@ -627,6 +748,9 @@ def NWB_movie_path_and_cell_description_export():
                                                                                 gain=0.03, 
                                                                                 sweep_number=movie_i)
                             nwbfile.add_acquisition(stimulus, use_sweep_table=True)
+                            stim_now = True
+                        else:
+                            stim_now = False
                     else:
                         print('unknown recording mode')
                         
@@ -639,11 +763,26 @@ def NWB_movie_path_and_cell_description_export():
                     
                     ap_times_list.append(ap_times)
                     ap_snrs_list.append(ap_snrs)
+                    
+                    
+                    #add epochs - that connects modalitis
+# =============================================================================
+#                     response_list.append(response)
+#                     neuropil_response_list.append(neuropilresponseseries)
+#                     roi_response_list.append(roiresponseseries)
+#                     reg_movie_list.append(reg_movie)
+#                     if stim_now:
+#                         stimulus_list.append(stimulus)
+#                         nwbfile.add_epoch(float(sweep_start_time),len(response_trace)/sample_rate+float(sweep_start_time), timeseries=(stimulus, response, neuropilresponseseries,roiresponseseries,reg_movie))
+#                     else:
+# =============================================================================
+                    nwbfile.add_epoch(float(sweep_start_time),len(response_trace)/sample_rate+float(sweep_start_time), timeseries=(response, neuropilresponseseries,roiresponseseries,reg_movie))
+                    
+                    
                 nwbfile.add_analysis(ap_metadata_table)
                 ap_times_all = np.concatenate(ap_times_list)
                 ap_snrs_all = np.concatenate(ap_snrs_list)
                 
-                # TODO add action potentials, don't know how to do it
                 
                  
                 trial_columns = [{'name': 'angle',
@@ -653,7 +792,9 @@ def NWB_movie_path_and_cell_description_export():
                                  {'name': 'cycles_per_degree',
                                   'description':'cycles per degree of drifting grating stimulus'},
                                  {'name': 'amplitude',
-                                  'description':'amplitude of drifting grating stimulus'},                        
+                                  'description':'amplitude of drifting grating stimulus'},
+                                 {'name': 'movie_number',
+                                  'description':'during which movie this visual stimulus happened'},
                         ]
         
                 # Add new table columns to nwb trial-table for trial-label
@@ -676,6 +817,7 @@ def NWB_movie_path_and_cell_description_export():
                     trial['cycles_per_second'] = trial_dj['visual_stim_grating_cyclespersecond']
                     trial['cycles_per_degree'] = trial_dj['visual_stim_grating_cyclesperdegree']
                     trial['amplitude'] = trial_dj['visual_stim_grating_amplitude']
+                    trial['movie_number'] = movie_i
                     
                     nwbfile.add_trial(**trial)
                 
@@ -690,23 +832,9 @@ def NWB_movie_path_and_cell_description_export():
                                     'Median action potential signal-to-noise ratio':round(np.median(ap_snrs_all),2)}
                 metadata_table = metadata_table.append(metadata_dict_now, ignore_index=True)
                 metadata_table.to_csv(os.path.join(savedir,'summary_data.csv'))
-# =============================================================================
-#                 #%
-#                 
-#                 #%
-#                     #%
-#                     #break
-#                 break
-#             break
-#         break
-#     #break
-#                     #%
-# =============================================================================
+   
                     
-                    
-                    
-                    
-                    
+                #%
                     
                 # =============== Write NWB 2.0 file ===============
                 if save_nwb:
@@ -717,11 +845,16 @@ def NWB_movie_path_and_cell_description_export():
                         with NWBHDF5IO(os.path.join(nwb_output_dir, save_file_name), mode='w') as io:
                             io.write(nwbfile)
                             print(f'Write NWB 2.0 file: {save_file_name}')
+                
+                try:
+                    del movie_list,movie_reg,reg_movie,nwbfile
+                except:
+                    del nwbfile
+            
             
                 #return nwbfile
 
-
-    
+  
                     #%%
                     
 def export_movies_with_metadata():
