@@ -341,12 +341,11 @@ def NWB_movie_path_and_cell_description_export():
     
     zero_zero_time = datetime.strptime('00:00:00', '%H:%M:%S').time()  # no precise time available
     session_description = {'related_publications':['10.25378/janelia.13148243','10.1101/2021.11.08.467793'],#publication DOI comes here
-                           'experiment_description':'Simultaneous GCaMP8 imaging and cell-attached electrophysiology recordings of primary visual cortex layer 2 pyramidal cells and interneurons in vivo during drifting gratings visual stimulation',
-                           'keywords':['GCaMP', 'GECI', 'cell attached electrophysiology','GCaMP8', 'extracellular electrophysiology','visual stimulation'],
+                           'experiment_description':'Simultaneous loose-seal cell-attached recordings and two-photon imaging of GCaMP (jGCaMP8s/m/f, jGCaMP7f, XCaMPgf) expressing mouse visual cortex neurons (pyramidal cells and FS interneurons) with drifting gratings visual stimuli',
+                           'keywords':['V1', 'calcium','spike','action potential','2-photon','parvalbumin','layer 2','AAV', 'adeno-associated virus'],
                            'lab':'Lab of Karel Svoboda at HHMI Janelia Research Campus',
-                           'institution':'HHMI Janelia Research Campus'
+                           'institution':'GENIE project, HHMI Janelia Research Campus'
                            }
-     
     sensor_name_translator = {'456': 'jGCaMP8f',
                               '686': 'jGCaMP8m',
                               '688': 'jGCaMP8s',
@@ -368,7 +367,7 @@ def NWB_movie_path_and_cell_description_export():
     channel_offset_crit = 'channel_offset > {}'.format(min_channel_offset)
     
     calcium_sensors = np.unique(imaging_gt.SessionCalciumSensor().fetch('session_calcium_sensor'))
-    calcium_sensors = ['688','686']
+    #calcium_sensors = ['688','686']
     for sensor in calcium_sensors:
         sensor_crit = 'session_calcium_sensor="{}"'.format(sensor)
         movies_all = (imaging.MovieChannel()*ephysanal_cell_attached.SweepAPQC()*imaging_gt.SessionCalciumSensor()*imaging_gt.MovieCalciumWaveSNR() & sensor_crit&ephys_quality_crit_1&ephys_quality_crit_2&channel_offset_crit)
@@ -409,7 +408,7 @@ def NWB_movie_path_and_cell_description_export():
                 nwbfile.session_id = nwbfilename
                 
                 device = nwbfile.create_device(name='MMIMS: custom-built two-photon microscope with a resonant scanner')
-                device_ephys = nwbfile.create_device(name='Multiclamp 700B',manufacturer = 'Axon Instruments',description = 'with 20 kHz low-pass filter')
+                device_ephys = nwbfile.create_device(name='Multiclamp 700B',manufacturer = 'Axon Instruments',description = 'Multiclamp 700B with 20 kHz low-pass filter')
                 electrode = nwbfile.create_icephys_electrode(name='Micropipette',
                                                         description='Micropipette (3–9 MOhm) filled with sterile saline containing {} micromolar AlexaFluor 594'.format(alexa_concentration),
                                                         device=device_ephys)
@@ -444,6 +443,24 @@ def NWB_movie_path_and_cell_description_export():
                 ap_metadata_table = pynwb.icephys.IntracellularResponsesTable(columns = columns_ap_table,
                                                                               colnames = ['ap_time','ap_snr']
                                                                                )
+                
+                #add columns for visual stimulation:
+                
+                trial_columns = [{'name': 'angle',
+                                  'description':'angle of drifting grating stimulus in degrees'},
+                                 {'name': 'cycles_per_second',
+                                  'description':'cycles per second of drifting grating stimulus'},
+                                 {'name': 'cycles_per_degree',
+                                  'description':'cycles per degree of drifting grating stimulus'},
+                                 {'name': 'amplitude',
+                                  'description':'amplitude of drifting grating stimulus'},
+                                 {'name': 'movie_number',
+                                  'description':'during which movie this visual stimulus happened'},
+                        ]
+                # Add new table columns to nwb trial-table for trial-label
+                for c in trial_columns:
+                    nwbfile.add_trial_column(**c)
+                
     
                 movie_numbers = np.unique(movie_numbers) # there is a stupid bug where a movie is duplicated
                 ap_times_list = []
@@ -776,6 +793,29 @@ def NWB_movie_path_and_cell_description_export():
 #                         nwbfile.add_epoch(float(sweep_start_time),len(response_trace)/sample_rate+float(sweep_start_time), timeseries=(stimulus, response, neuropilresponseseries,roiresponseseries,reg_movie))
 #                     else:
 # =============================================================================
+                    
+                    # add visual stim trials
+                    sweep_start_times,sweep_end_times = (imaging_gt.ROISweepCorrespondance()*ephys_cell_attached.Sweep()&movie_crit&this_session).fetch('sweep_start_time','sweep_end_time')
+                    movie_time_edges = np.asarray([np.min(sweep_start_times),np.max(sweep_end_times)],float) + cell_start_time.total_seconds()-this_session['session_time'].total_seconds()
+                    trials_needed = experiment.VisualStimTrial()&this_session&'visual_stim_grating_start > {}'.format(movie_time_edges[0])&'visual_stim_grating_start < {}'.format(movie_time_edges[1])
+                    
+                    #%
+                    # Add entry to the trial-table
+                    for trial_dj in trials_needed:
+                        
+                        #%
+                        trial = {}
+                        trial['start_time'] =float(trial_dj['visual_stim_grating_start']) -cell_start_time.total_seconds()+this_session['session_time'].total_seconds()
+                        trial['stop_time'] = float(trial_dj['visual_stim_grating_end']) -cell_start_time.total_seconds()+this_session['session_time'].total_seconds()
+                        trial['angle'] = trial_dj['visual_stim_grating_angle']
+                        trial['cycles_per_second'] = trial_dj['visual_stim_grating_cyclespersecond']
+                        trial['cycles_per_degree'] = trial_dj['visual_stim_grating_cyclesperdegree']
+                        trial['amplitude'] = trial_dj['visual_stim_grating_amplitude']
+                        trial['movie_number'] = movie_i
+                        
+                        nwbfile.add_trial(**trial)
+                    
+                    
                     nwbfile.add_epoch(float(sweep_start_time),len(response_trace)/sample_rate+float(sweep_start_time), timeseries=(response, neuropilresponseseries,roiresponseseries,reg_movie))
                     
                     
@@ -785,41 +825,9 @@ def NWB_movie_path_and_cell_description_export():
                 
                 
                  
-                trial_columns = [{'name': 'angle',
-                                  'description':'angle of drifting grating stimulus in degrees'},
-                                 {'name': 'cycles_per_second',
-                                  'description':'cycles per second of drifting grating stimulus'},
-                                 {'name': 'cycles_per_degree',
-                                  'description':'cycles per degree of drifting grating stimulus'},
-                                 {'name': 'amplitude',
-                                  'description':'amplitude of drifting grating stimulus'},
-                                 {'name': 'movie_number',
-                                  'description':'during which movie this visual stimulus happened'},
-                        ]
-        
-                # Add new table columns to nwb trial-table for trial-label
-                for c in trial_columns:
-                    nwbfile.add_trial_column(**c)
-                    #%
-                sweep_start_times,sweep_end_times = (ephys_cell_attached.Sweep()&cell_crit&this_session).fetch('sweep_start_time','sweep_end_time')
-                cell_time_edges = np.asarray([np.min(sweep_start_times),np.max(sweep_end_times)],float) + cell_start_time.total_seconds()-this_session['session_time'].total_seconds()
-                trials_needed = experiment.VisualStimTrial()&this_session&'visual_stim_grating_start > {}'.format(cell_time_edges[0])&'visual_stim_grating_start < {}'.format(cell_time_edges[1])
                 
-                #%
-                # Add entry to the trial-table
-                for trial_dj in trials_needed:
-                    
                     #%
-                    trial = {}
-                    trial['start_time'] =float(trial_dj['visual_stim_grating_start']) -cell_start_time.total_seconds()+this_session['session_time'].total_seconds()
-                    trial['stop_time'] = float(trial_dj['visual_stim_grating_end']) -cell_start_time.total_seconds()+this_session['session_time'].total_seconds()
-                    trial['angle'] = trial_dj['visual_stim_grating_angle']
-                    trial['cycles_per_second'] = trial_dj['visual_stim_grating_cyclespersecond']
-                    trial['cycles_per_degree'] = trial_dj['visual_stim_grating_cyclesperdegree']
-                    trial['amplitude'] = trial_dj['visual_stim_grating_amplitude']
-                    trial['movie_number'] = movie_i
-                    
-                    nwbfile.add_trial(**trial)
+                
                 
                 #%
                 metadata_dict_now= {'Calcium Sensor':sensor_name_translator[this_session['session_calcium_sensor']],
