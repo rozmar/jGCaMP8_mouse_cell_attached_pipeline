@@ -336,7 +336,8 @@ def NWB_movie_path_and_cell_description_export():
     save_registered_movies = True
     overwrite_nwb = False
     save_movies_as_tif = True
-    savedir = '/home/rozmar/Mount/HDD_RAID_2_16TB/GCaMP8_NWB'#'/home/rozmar/Data/Calcium_imaging/GCaMP8_NWB'#
+    savedir = '/home/rozmar/Data/Calcium_imaging/GCaMP8_NWB/DANDI/000168_v2'#'/home/rozmar/Data/Calcium_imaging/GCaMP8_NWB'#
+    registered_movie_dir = '/home/rozmar/Mount/HDD_RAID_2_16TB/GCaMP8_NWB/movie_registered'
     nwb_output_dir = savedir
     
     zero_zero_time = datetime.strptime('00:00:00', '%H:%M:%S').time()  # no precise time available
@@ -390,10 +391,11 @@ def NWB_movie_path_and_cell_description_export():
                 nwbfilename = '_'.join([sensor_name_translator[this_session['session_calcium_sensor']],'ANM' + str(this_session['subject_id']),'cell'+str(cell_i+1).zfill(2)])
                 if os.path.exists(nwb_output_dir):
                     save_file_name = ''.join([nwbfilename, '.nwb'])
-                    if not overwrite_nwb and os.path.exists(os.path.join(nwb_output_dir, save_file_name)):
+                    if not overwrite_nwb and os.path.exists(os.path.join(nwb_output_dir,sensor_name_translator[sensor], save_file_name)):
                         print('file already saved: {}'.format(save_file_name))
-                        break
+                        continue
                             
+#                    asd
                             
                 nwbfile = NWBFile(identifier=nwbfilename,
                                   session_description='',
@@ -520,19 +522,24 @@ def NWB_movie_path_and_cell_description_export():
                     reg_file_list_nwb = []
                     if save_registered_movies:
                         if save_movies_as_tif:
-                            Path(os.path.join(savedir,'movie_registered',nwbfile.identifier,'movie_{}'.format(str(movie_i).zfill(3)))).mkdir(parents=True, exist_ok=True)
+                            Path(os.path.join(registered_movie_dir,nwbfile.identifier,'movie_{}'.format(str(movie_i).zfill(3)))).mkdir(parents=True, exist_ok=True)
                         for file_i,(dir_now,name_now) in enumerate(zip(movie_dirs_registered,movie_names_registered)):
+                            if 'combo' in name_now:
+                                continue
                             reg_file_list_source.append(os.path.join(source_dir_base,dir_now,name_now))
-                            reg_file_list.append(os.path.join(savedir,'movie_registered',nwbfile.identifier,'movie_{}'.format(str(movie_i).zfill(3)),'registered_{}.tif'.format(str(file_i).zfill(3))))
-                            reg_file_list_nwb.append(os.path.join('movie_registered',nwbfile.identifier,'movie_{}'.format(str(movie_i).zfill(3)),'registered_{}.tif'.format(str(file_i).zfill(3))))
+                            reg_file_list.append(os.path.join(registered_movie_dir,nwbfile.identifier,'movie_{}'.format(str(movie_i).zfill(3)),'registered_{}.tif'.format(str(file_i).zfill(3))))
+                            reg_file_list_nwb.append(os.path.join(registered_movie_dir,nwbfile.identifier,'movie_{}'.format(str(movie_i).zfill(3)),'registered_{}.tif'.format(str(file_i).zfill(3))))
                             if save_movies_as_tif:
                                 if save_registered_movies and not os.path.exists(reg_file_list[-1]):
+                                    
                                     shutil.copyfile(reg_file_list_source[-1],reg_file_list[-1])
                                 
                         
                     
                     mean_image_ch1 = (imaging.RegisteredMovieImage()&movie_crit&'channel_number = 1').fetch1('registered_movie_mean_image')
+                    mean_image_ch1 = mean_image_ch1.T
                     mean_image_ch2 = (imaging.RegisteredMovieImage()&movie_crit&'channel_number = 2').fetch1('registered_movie_mean_image')
+                    mean_image_ch2 = mean_image_ch2.T
                     pixel_size = float((imaging.Movie()&movie_crit).fetch1('movie_pixel_size'))
                     line_rate = 1/(imaging.MovieMetaData()&movie_crit).fetch1('movie_hroimanager_lineperiod')
                     depth = (imaging_gt.MovieDepth()&movie_crit).fetch1('movie_depth')
@@ -573,7 +580,7 @@ def NWB_movie_path_and_cell_description_export():
                     # TwoPhotonSeries (raw movie), 
                     if save_raw_movies:
                         raw_movie = pynwb.ophys.TwoPhotonSeries(name='Raw movie {}'.format(movie_i),
-                                                                dimension=[int(movie_x_size), int(movie_y_size)],
+                                                                dimension=[int(movie_x_size), int(movie_y_size),len(time_stamps)],
                                                                 external_file=raw_file_list_nwb,
                                                                 imaging_plane=imaging_plane,
                                                                 starting_frame=[0],
@@ -606,11 +613,15 @@ def NWB_movie_path_and_cell_description_export():
                             
                             #%
                             #%
-                        movie_reg = np.concatenate(movie_list)
+                        movie_reg = np.concatenate(movie_list).T
+                        if movie_reg.shape[2] != len(time_stamps):
+                            print('wrong number of frames in registered movie')
+                            asd
+                        
                         #%
-                        wrapped_data = H5DataIO(data=movie_reg, compression=True)     
+                        wrapped_data = H5DataIO(data=movie_reg, compression='gzip', compression_opts=5)     
                         reg_movie = pynwb.ophys.TwoPhotonSeries(name='Registered movie {}'.format(movie_i),
-                                                                dimension=[int(movie_x_size), int(movie_y_size)],
+                                                                dimension=[int(movie_x_size), int(movie_y_size),len(time_stamps)],
                                                                 data = wrapped_data,
                                                                 unit = 'au',
                                                                 imaging_plane=imaging_plane,
@@ -666,9 +677,9 @@ def NWB_movie_path_and_cell_description_export():
                         neuropil_f_list.append(roi_data['neuropil_f'])
                         
                         mask = np.zeros(mean_image_ch1.shape)
-                        mask[roi_data['roi_ypix'],roi_data['roi_xpix']] = roi_data['roi_weights']/np.sum(roi_data['roi_weights'])
+                        mask[roi_data['roi_xpix'],roi_data['roi_ypix']] = roi_data['roi_weights']/np.sum(roi_data['roi_weights'])
                         neuropil_mask = np.zeros(mean_image_ch1.shape)
-                        neuropil_mask[roi_data['neuropil_ypix'],roi_data['neuropil_xpix']] = 1
+                        neuropil_mask[roi_data['neuropil_xpix'],roi_data['neuropil_ypix']] = 1
                         neuropil_mask = neuropil_mask/np.sum(neuropil_mask)
                     #%
                         pln_seg.add_roi(
@@ -838,6 +849,12 @@ def NWB_movie_path_and_cell_description_export():
                                     'Recording mode':' & '.join(np.unique(recording_mode_list)),
                                     'Total action potential number':len(ap_times_all),
                                     'Median action potential signal-to-noise ratio':round(np.median(ap_snrs_all),2)}
+                try: # just extend the previous file if present
+                    metadata_table = pd.read_csv(os.path.join(savedir,'summary_data.csv'))
+                    # TODO fix this, the row numbers are repeating..
+                except:
+                    print('couldn''t load csv file')
+                    pass
                 metadata_table = metadata_table.append(metadata_dict_now, ignore_index=True)
                 metadata_table.to_csv(os.path.join(savedir,'summary_data.csv'))
    
@@ -849,8 +866,8 @@ def NWB_movie_path_and_cell_description_export():
                     save_file_name = ''.join([nwbfile.identifier, '.nwb'])
                     if not os.path.exists(nwb_output_dir):
                         os.makedirs(nwb_output_dir)
-                    if overwrite_nwb or not os.path.exists(os.path.join(nwb_output_dir, save_file_name)):
-                        with NWBHDF5IO(os.path.join(nwb_output_dir, save_file_name), mode='w') as io:
+                    if overwrite_nwb or not os.path.exists(os.path.join(nwb_output_dir,sensor_name_translator[sensor] , save_file_name)):
+                        with NWBHDF5IO(os.path.join(nwb_output_dir,sensor_name_translator[sensor], save_file_name), mode='w') as io:
                             io.write(nwbfile)
                             print(f'Write NWB 2.0 file: {save_file_name}')
                 
