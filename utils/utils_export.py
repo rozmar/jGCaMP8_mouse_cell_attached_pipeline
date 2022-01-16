@@ -328,7 +328,7 @@ def downsample_movies_and_ROIs(downsampling_factor = 2,overwrite = False,only_me
 #%%
 def NWB_movie_path_and_cell_description_export():
     #%%
-    source_dir_base = '/home/rozmar/Network/slab_share_mr'
+    source_dir_base = '/home/rozmar/Network/gsuite/mr_share'
     column_names = ['Calcium Sensor','Subject ID','Cell number','Putative cell type','Total recording length','Recording mode','Total action potential number','Median action potential signal-to-noise ratio']
     metadata_table = pd.DataFrame(columns = column_names)
     save_nwb = True
@@ -336,8 +336,8 @@ def NWB_movie_path_and_cell_description_export():
     save_registered_movies = True
     overwrite_nwb = False
     save_movies_as_tif = True
-    savedir = '/home/rozmar/Data/Calcium_imaging/GCaMP8_NWB/DANDI/000168_v2'#'/home/rozmar/Data/Calcium_imaging/GCaMP8_NWB'#
-    registered_movie_dir = '/home/rozmar/Mount/HDD_RAID_2_16TB/GCaMP8_NWB/movie_registered'
+    savedir = '/home/rozmar/Mount/HDD_ext_1_4TB/000168'#'/home/rozmar/Data/Calcium_imaging/GCaMP8_NWB'#
+    registered_movie_dir = '/home/rozmar/Mount/HDD_ext_2_4TB/GCaMP8_movies'
     nwb_output_dir = savedir
     
     zero_zero_time = datetime.strptime('00:00:00', '%H:%M:%S').time()  # no precise time available
@@ -411,7 +411,7 @@ def NWB_movie_path_and_cell_description_export():
                 
                 device = nwbfile.create_device(name='MMIMS: custom-built two-photon microscope with a resonant scanner')
                 device_ephys = nwbfile.create_device(name='Multiclamp 700B',manufacturer = 'Axon Instruments',description = 'Multiclamp 700B with 20 kHz low-pass filter')
-                electrode = nwbfile.create_icephys_electrode(name='Micropipette',
+                electrode = nwbfile.create_ic_electrode(name='Micropipette',
                                                         description='Micropipette (3–9 MOhm) filled with sterile saline containing {} micromolar AlexaFluor 594'.format(alexa_concentration),
                                                         device=device_ephys)
                 subj = (lab.Subject & subject_crit).fetch1()
@@ -580,7 +580,7 @@ def NWB_movie_path_and_cell_description_export():
                     # TwoPhotonSeries (raw movie), 
                     if save_raw_movies:
                         raw_movie = pynwb.ophys.TwoPhotonSeries(name='Raw movie {}'.format(movie_i),
-                                                                dimension=[int(movie_x_size), int(movie_y_size),len(time_stamps)],
+                                                                dimension=[len(time_stamps),int(movie_x_size), int(movie_y_size)],
                                                                 external_file=raw_file_list_nwb,
                                                                 imaging_plane=imaging_plane,
                                                                 starting_frame=[0],
@@ -613,15 +613,17 @@ def NWB_movie_path_and_cell_description_export():
                             
                             #%
                             #%
-                        movie_reg = np.concatenate(movie_list).T
-                        if movie_reg.shape[2] != len(time_stamps):
+                        
+                        movie_reg = np.concatenate(movie_list)
+                        movie_reg  = np.rollaxis(movie_reg,2,1) # nwb dimensions are (time,x,y)
+                        if movie_reg.shape[0] != len(time_stamps):
                             print('wrong number of frames in registered movie')
                             asd
                         
                         #%
                         wrapped_data = H5DataIO(data=movie_reg, compression='gzip', compression_opts=5)     
                         reg_movie = pynwb.ophys.TwoPhotonSeries(name='Registered movie {}'.format(movie_i),
-                                                                dimension=[int(movie_x_size), int(movie_y_size),len(time_stamps)],
+                                                                dimension=[len(time_stamps),int(movie_x_size), int(movie_y_size)],
                                                                 data = wrapped_data,
                                                                 unit = 'au',
                                                                 imaging_plane=imaging_plane,
@@ -851,12 +853,14 @@ def NWB_movie_path_and_cell_description_export():
                                     'Median action potential signal-to-noise ratio':round(np.median(ap_snrs_all),2)}
                 try: # just extend the previous file if present
                     metadata_table = pd.read_csv(os.path.join(savedir,'summary_data.csv'))
+                    metadata_table.drop('Unnamed: 0',1)
                     # TODO fix this, the row numbers are repeating..
                 except:
                     print('couldn''t load csv file')
                     pass
+                
                 metadata_table = metadata_table.append(metadata_dict_now, ignore_index=True)
-                metadata_table.to_csv(os.path.join(savedir,'summary_data.csv'))
+                
    
                     
                 #%
@@ -866,10 +870,13 @@ def NWB_movie_path_and_cell_description_export():
                     save_file_name = ''.join([nwbfile.identifier, '.nwb'])
                     if not os.path.exists(nwb_output_dir):
                         os.makedirs(nwb_output_dir)
+                    if not os.path.exists(os.path.join(nwb_output_dir,sensor_name_translator[sensor])):
+                        os.makedirs(os.path.join(nwb_output_dir,sensor_name_translator[sensor]))
                     if overwrite_nwb or not os.path.exists(os.path.join(nwb_output_dir,sensor_name_translator[sensor] , save_file_name)):
                         with NWBHDF5IO(os.path.join(nwb_output_dir,sensor_name_translator[sensor], save_file_name), mode='w') as io:
                             io.write(nwbfile)
                             print(f'Write NWB 2.0 file: {save_file_name}')
+                metadata_table.to_csv(os.path.join(savedir,'summary_data.csv'))
                 
                 try:
                     del movie_list,movie_reg,reg_movie,nwbfile
