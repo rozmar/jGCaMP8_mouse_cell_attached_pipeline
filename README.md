@@ -7,7 +7,7 @@ https://dandiarchive.org/dandiset/000168/
 https://doi.org/10.1101/2021.11.08.467793 
 
 ## Please see the following notebook on how to use the dataset:
-https://raw.githubusercontent.com/rozmar/jGCaMP8_mouse_cell_attached_pipeline/master/NWB_tutorial.ipynb
+https://github.com/rozmar/jGCaMP8_mouse_cell_attached_pipeline/blob/master/NWB_tutorial.ipynb
 
 # Dataset description
 
@@ -49,6 +49,5 @@ If you wish to download the whole dataset (1.4 TB) locally, please go to the des
 dandi download DANDI:000168
 ```
 Please refer to (https://www.dandiarchive.org/handbook/10_using_dandi/) for more details. <br>
-Alternatively, [this tutorial](https://raw.githubusercontent.com/rozmar/jGCaMP8_mouse_cell_attached_pipeline/master/NWB_tutorial.ipynb
-) describes below how to stream the data or download the data of a single cell of interest.
+Alternatively, [this tutorial](https://github.com/rozmar/jGCaMP8_mouse_cell_attached_pipeline/blob/master/NWB_tutorial.ipynb) describes below how to stream the data or download the data of a single cell of interest.
 
