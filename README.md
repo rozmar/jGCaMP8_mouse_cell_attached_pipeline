@@ -41,6 +41,7 @@ nwbwidgets - for browsing .nwb files:<br>
 #### To install, type:
 ```
 pip install nwbwidgets
+```
 
 ## Download data
 You can either stream data from DANDI archives, download the whole dataset, or download the data of a single cell. <br>
