@@ -23,17 +23,36 @@ def plot_r_neu_distribution(sensor_colors,ca_wave_parameters,plot_parameters):
     radius_fit_x = np.arange(5,20)
     radius_fit_order = 1
     min_rneu_corrcoeff = .7
-    fig = plt.figure(figsize = [15,15])
+    fig = plt.figure(figsize = [22.5,15])
     if 'ax' in plot_parameters.keys():
         ax_hist_rneu = plot_parameters['ax']
     else:
-        ax_hist_rneu = fig.add_subplot(2,2,1)
+        ax_hist_rneu = fig.add_subplot(3,2,1)
     ax_cumhist_rneu = ax_hist_rneu.twinx()
-    ax_depth_rneu = fig.add_subplot(2,2,2)
-    ax_radius_rneu = fig.add_subplot(2,2,3)
-    ax_radius_depth = fig.add_subplot(2,2,4)
+    ax_F0_rneu = fig.add_subplot(3,2,2)
+    ax_depth_rneu = fig.add_subplot(3,2,3)
+    
+    ax_radius_rneu = fig.add_subplot(3,2,4)
+    ax_radius_depth = fig.add_subplot(3,2,5)
+    
+    ax_neuropil_f0 = fig.add_subplot(3,2,6)
+    
+    
     rneu_histogram_step = .1
     
+    ax_F0_rneu.set_xlabel('Median neuropil fluorescence')
+    ax_F0_rneu.set_ylabel('r_neu')
+    
+    ax_depth_rneu.set_xlabel('depth (micron)')
+    ax_depth_rneu.set_ylabel('r_neu')
+    ax_radius_rneu.set_xlabel('cell radius (pixel)')
+    ax_radius_rneu.set_ylabel('r_neu')
+    
+    ax_radius_depth.set_xlabel('depth (micron)')
+    ax_radius_depth.set_ylabel('cell radius (pixel)')
+    
+    ax_neuropil_f0.set_xlabel('Roi F median')
+    ax_neuropil_f0.set_ylabel('Neuropil F median')
     
     #rneu_all = (imaging_gt.SessionCalciumSensor()*imaging_gt.ROINeuropilCorrelation()&'r_neu_corrcoeff>.7'&'channel_number=1'&'neuropil_number = 1').fetch('r_neu')
     bar_width = rneu_histogram_step*.9#/len(ca_wave_parameters['sensors'])*.9
@@ -45,7 +64,7 @@ def plot_r_neu_distribution(sensor_colors,ca_wave_parameters,plot_parameters):
     rneu_all = list()
     depth_all = list()
     for sensor in ca_wave_parameters['sensors']:
-        data,depth,roi_radius,movie_pixel_size = (imaging.Movie()*imaging.ROI()*imaging.MoviePowerPostObjective()*imaging_gt.MovieDepth()*imaging_gt.SessionCalciumSensor()*imaging_gt.ROINeuropilCorrelation()&'r_neu_corrcoeff>{}'.format(min_rneu_corrcoeff)&'channel_number=1'&'neuropil_number = 1'&'session_calcium_sensor = "{}"'.format(sensor)).fetch('r_neu','movie_depth','roi_radius','movie_pixel_size')#'movie_depth'movie_power
+        data,depth,roi_radius,movie_pixel_size,F_median,Fneu_median = (imaging.ROINeuropilTrace()*imaging.ROITrace()*imaging.Movie()*imaging.ROI()*imaging.MoviePowerPostObjective()*imaging_gt.MovieDepth()*imaging_gt.SessionCalciumSensor()*imaging_gt.ROINeuropilCorrelation()&'r_neu_corrcoeff>{}'.format(min_rneu_corrcoeff)&'channel_number=1'&'neuropil_number = 1'&'session_calcium_sensor = "{}"'.format(sensor)).fetch('r_neu','movie_depth','roi_radius','movie_pixel_size','roi_f_median','neuropil_f_median')#'movie_depth'movie_power
         
         cell_radius = roi_radius*np.asarray(movie_pixel_size,float)
         needed = (np.isnan(depth)==False) & (np.isnan(data)==False) &(data<=2) &(cell_radius<12)
@@ -59,6 +78,9 @@ def plot_r_neu_distribution(sensor_colors,ca_wave_parameters,plot_parameters):
         ax_depth_rneu.plot(depth,data,'o',color = sensor_colors[sensor],alpha = .3)
         ax_depth_rneu.plot(depth_fit_x,np.polyval(p,depth_fit_x),'-',color = sensor_colors[sensor])
         
+        ax_F0_rneu.plot(Fneu_median,data,'o',color = sensor_colors[sensor],alpha = .3)
+        
+        ax_neuropil_f0.plot(F_median,Fneu_median,'o',color = sensor_colors[sensor],alpha = .3)
         
         p=np.polyfit(depth[needed],cell_radius[needed],depth_fit_order)
         ax_radius_depth.plot(depth,cell_radius,'o',color = sensor_colors[sensor],alpha = .3)
@@ -317,6 +339,7 @@ def plot_ap_scatter_with_third_parameter(ca_waves_dict,plot_parameters):
  #%%       
 
 def plot_superresolution_grand_averages(superresolution_traces,plot_parameters):
+
     fig_grand_average_traces_pyr = plt.figure()
     ax_grand_average = fig_grand_average_traces_pyr.add_subplot(1,1,1)
     for sensor in plot_parameters['sensors']:
@@ -333,6 +356,59 @@ def plot_superresolution_grand_averages(superresolution_traces,plot_parameters):
             y = y/np.nanmax(y)
         color = plot_parameters['sensor_colors'][sensor]
         ax_grand_average.plot(x,y,'-',color = color,linewidth = plot_parameters['linewidth'],alpha = 0.9)
+        
+        if plot_parameters['error_bar'] != 'none':
+            ax_grand_average.fill_between(x, y-error, y+error,color =color,alpha = .3)
+    ax_grand_average.set_xlim([plot_parameters['start_time'],plot_parameters['end_time']])
+    ax_grand_average.plot(0,-.05,'r|',markersize = 18)
+    utils_plot.add_scalebar_to_fig(ax_grand_average,
+                        axis = 'y',
+                        size = plot_parameters['yscalesize'],
+                        conversion = 100,
+                        unit = r'dF/F%',
+                        color = 'black',
+                        location = 'top right',
+                        linewidth = 5)
+    utils_plot.add_scalebar_to_fig(ax_grand_average,
+                        axis = 'x',
+                        size = plot_parameters['xscalesize'],
+                        conversion = 1,
+                        unit = r'ms',
+                        color = 'black',
+                        location = 'top right',
+                        linewidth = 5)
+    figfile = os.path.join(plot_parameters['figures_dir'],plot_parameters['fig_name']+'.{}')
+    fig_grand_average_traces_pyr.savefig(figfile.format('svg'))
+    inkscape_cmd = ['/usr/bin/inkscape', '--file',figfile.format('svg'),'--export-emf', figfile.format('emf')]
+    subprocess.run(inkscape_cmd )
+
+def plot_rise_times_and_peak_selection(superresolution_traces,plot_parameters):
+    rise_start_percentile = .9
+    peak_width= 25 #ms    
+    fig_grand_average_traces_pyr = plt.figure()
+    ax_grand_average = fig_grand_average_traces_pyr.add_subplot(1,1,1)
+    for sensor in plot_parameters['sensors']:
+        x = superresolution_traces[sensor]['{}_time'.format(plot_parameters['trace_to_use'])]
+        y = superresolution_traces[sensor]['{}_{}'.format(plot_parameters['trace_to_use'],plot_parameters['superresolution_function'])]
+        if plot_parameters['error_bar'] == 'sd':
+            error = superresolution_traces[sensor]['{}_sd'.format(plot_parameters['trace_to_use'])]
+        elif plot_parameters['error_bar'] == 'se':
+            error = superresolution_traces[sensor]['{}_sd'.format(plot_parameters['trace_to_use'])]/np.sqrt(superresolution_traces[sensor]['{}_n'.format(plot_parameters['trace_to_use'])])
+        else:
+            error =np.zeros(len(y))
+        if plot_parameters['normalize_to_max']:
+            error = error/np.nanmax(y)
+            y = y/np.nanmax(y)
+        color = plot_parameters['sensor_colors'][sensor]
+        ax_grand_average.plot(x,y,'-',color = color,linewidth = plot_parameters['linewidth']*2,alpha = 0.5)
+        start_idx = np.argmax(y/np.max(y)>rise_start_percentile)
+        print([sensor,x[start_idx]])
+        si = np.diff(x)[100]
+        end_idx = int(start_idx+peak_width/si)
+        offset = int((1/122*1000)/si)
+        ax_grand_average.plot(x[np.asarray([start_idx])],y[np.asarray([start_idx])],'|',color = color,linewidth = plot_parameters['linewidth'],alpha = 1,ms = 20)
+        ax_grand_average.plot(np.mean(x[start_idx:end_idx+offset]),np.mean(y[start_idx:end_idx+offset]),'o',color = color,linewidth = plot_parameters['linewidth'],alpha = 1)
+        ax_grand_average.plot(x[np.asarray([start_idx,end_idx+offset])],[np.mean(y[start_idx:end_idx+offset])]*2,'-',color = color,linewidth = plot_parameters['linewidth']/2,alpha = 1)
         if plot_parameters['error_bar'] != 'none':
             ax_grand_average.fill_between(x, y-error, y+error,color =color,alpha = .3)
     ax_grand_average.set_xlim([plot_parameters['start_time'],plot_parameters['end_time']])
@@ -481,9 +557,24 @@ def plot_2ap_superresolution_traces(ca_traces_dict,superresolution_traces_1ap,pl
 
 def plot_cell_wise_scatter_plots(ca_wave_parameters,ca_waves_dict,superresolution_traces,wave_parameters,plot_parameters):
     #%%
+    
+    fig_shotnoise = plt.figure()
+    ax_f0_std = fig_shotnoise.add_subplot(2,1,1)
+    ax_f0_df = fig_shotnoise.add_subplot(2,1,2)
+    
+    ax_f0_std.set_ylabel('SD(F0)')
+    ax_f0_df.set_ylabel('DF')
+    ax_f0_std.set_xlabel('F0')
+    ax_f0_df.set_xlabel('F0')
+    
+    
     risename = 'risetime_0_{}'.format(int(plot_parameters['partial_risetime_target']*100))
     dict_out = dict()
     amplitudes_all = list()
+    snrs_all = list()
+    f0s_all = list()
+    f0_stds_all = list()
+    powers_all = list()
     amplitudes_all_superresolution = list()
     amplitudes_idx_all = list()
     amplitudes_idx_all_superresolution = list()
@@ -492,19 +583,27 @@ def plot_cell_wise_scatter_plots(ca_wave_parameters,ca_waves_dict,superresolutio
     half_decay_times_all = list()
     half_decay_times_all_superresolution = list()
     partial_risetimes_all_superresolution = list()
-    fig_scatter_plots_1ap = plt.figure(figsize = [10,15])
-    ax_amplitude = fig_scatter_plots_1ap.add_subplot(4,2,1)
-    ax_risetime = fig_scatter_plots_1ap.add_subplot(4,2,3)
-    ax_half_decay_time= fig_scatter_plots_1ap.add_subplot(4,2,5)
-    ax_amplitude_superres = fig_scatter_plots_1ap.add_subplot(4,2,2,sharey = ax_amplitude)
-    ax_risetime_superres = fig_scatter_plots_1ap.add_subplot(4,2,4,sharey = ax_risetime)
-    ax_half_decay_time_superres = fig_scatter_plots_1ap.add_subplot(4,2,6,sharey = ax_half_decay_time)
-    ax_partial_risetime_superres = fig_scatter_plots_1ap.add_subplot(4,2,8)
+    fig_scatter_plots_1ap = plt.figure(figsize = [12.5,15])
+    ax_amplitude = fig_scatter_plots_1ap.add_subplot(5,2,1)
+    ax_risetime = fig_scatter_plots_1ap.add_subplot(5,2,3)
+    ax_half_decay_time= fig_scatter_plots_1ap.add_subplot(5,2,5)
+    ax_amplitude_superres = fig_scatter_plots_1ap.add_subplot(5,2,2,sharey = ax_amplitude)
+    ax_risetime_superres = fig_scatter_plots_1ap.add_subplot(5,2,4,sharey = ax_risetime)
+    ax_half_decay_time_superres = fig_scatter_plots_1ap.add_subplot(5,2,6,sharey = ax_half_decay_time)
+    ax_partial_risetime_superres = fig_scatter_plots_1ap.add_subplot(5,2,8)
+    ax_snr = fig_scatter_plots_1ap.add_subplot(5,2,7)
+    ax_f0 = fig_scatter_plots_1ap.add_subplot(5,2,9)
+    ax_power = fig_scatter_plots_1ap.add_subplot(5,2,10)
+    
     palettes = []
     for sensor_i,sensor in enumerate(ca_wave_parameters['sensors']):
         
         palettes.append(plot_parameters['sensor_colors']['boxplot'][sensor])
         sensor_amplitudes = list()
+        sensor_snrs = list()
+        sensor_f0s = list()
+        sensor_f0_stds = list()
+        sensor_powers = list()
         sensor_rise_times = list()
         sensor_half_decay_times = list()
         sensor_amplitudes_superresolution = list()
@@ -528,6 +627,25 @@ def plot_cell_wise_scatter_plots(ca_wave_parameters,ca_waves_dict,superresolutio
             amplitudes_idx_all.append(sensor_i)
             sensor_amplitudes.append(amplitude)
             
+            snr = ca_waves_dict_cell['cawave_snr_{}_per_ap'.format(wave_parameters['function_to_use'])][needed_apnum_idx]#cawave_baseline_f_std
+            #snr = ca_waves_dict_cell['cawave_baseline_f_std_{}_per_ap'.format(wave_parameters['function_to_use'])][needed_apnum_idx]#cawave_baseline_f_std
+            #snr = ca_waves_dict_cell['movie_power_{}_per_ap'.format(wave_parameters['function_to_use'])][needed_apnum_idx]#cawave_baseline_f_std
+            snrs_all.append(snr)   
+            sensor_snrs.append(snr)
+            
+            f0 = ca_waves_dict_cell['cawave_baseline_f_{}_per_ap'.format(wave_parameters['function_to_use'])][needed_apnum_idx]#cawave_baseline_f_std
+            f0s_all.append(f0)   
+            sensor_f0s.append(f0)
+            
+            f0_std = ca_waves_dict_cell['cawave_baseline_f_std_{}_per_ap'.format(wave_parameters['function_to_use'])][needed_apnum_idx]#cawave_baseline_f_std
+            f0_stds_all.append(f0_std)   
+            sensor_f0_stds.append(f0_std)
+            
+            
+            power = ca_waves_dict_cell['movie_power_{}_per_ap'.format(wave_parameters['function_to_use'])][needed_apnum_idx]#cawave_baseline_f_std
+            powers_all.append(power)   
+            sensor_powers.append(power)
+            
             rise_time = ca_waves_dict_cell['cawave_rise_time_{}_per_ap'.format(wave_parameters['function_to_use'])][needed_apnum_idx]
             sensor_rise_times.append(rise_time)
             risetimes_all.append(rise_time)
@@ -544,6 +662,17 @@ def plot_cell_wise_scatter_plots(ca_wave_parameters,ca_waves_dict,superresolutio
         xs = superresolution_traces[sensor]['{}_time_per_cell'.format(wave_parameters['trace_to_use'])]
         ys = superresolution_traces[sensor]['{}_{}_per_cell'.format(wave_parameters['trace_to_use'],wave_parameters['superresolution_function'])]
         ns = superresolution_traces[sensor]['{}_n_per_cell'.format(wave_parameters['trace_to_use'])]
+        
+        needed = np.asarray(sensor_f0s)<3000
+        ax_f0_std.plot(np.asarray(sensor_f0s)[needed],np.asarray(sensor_f0_stds)[needed],'o',color = plot_parameters['sensor_colors'][sensor])
+        ax_f0_df.plot(np.asarray(sensor_f0s)[needed],np.asarray(sensor_f0s)[needed]*np.asarray(sensor_amplitudes)[needed],'o',color = plot_parameters['sensor_colors'][sensor])
+        
+        p = np.polyfit(np.asarray(sensor_f0s)[needed],np.asarray(sensor_f0s)[needed]*np.asarray(sensor_amplitudes)[needed],1)
+        print([p,sensor])
+        f0_xvec = np.arange(np.min(np.asarray(sensor_f0s)[needed]),np.max(np.asarray(sensor_f0s)[needed]),10)
+        dff_yvec = np.polyval(p,f0_xvec)
+        ax_f0_df.plot(f0_xvec,dff_yvec,'-',color = plot_parameters['sensor_colors'][sensor])
+        
         
         for x,y,n,ca_waves_dict_cell in zip(xs,ys,ns,ca_waves_dict[sensor]):
             
@@ -598,14 +727,46 @@ def plot_cell_wise_scatter_plots(ca_wave_parameters,ca_waves_dict,superresolutio
 #         ax_half_decay_time_superres.bar(sensor_i,np.median(sensor_half_decay_times_superresolution),edgecolor = plot_parameters['sensor_colors'][sensor],fill=False,linewidth = 4) 
 #         ax_partial_risetime_superres.bar(sensor_i,np.median(sensor_partial_rise_times_superresolution),edgecolor = plot_parameters['sensor_colors'][sensor],fill=False,linewidth = 4) 
 # =============================================================================
+    needed = np.asarray(f0s_all)<3000
+    
+    p = np.polyfit(np.asarray(f0s_all)[needed],np.asarray(f0_stds_all)[needed],1)
+    print(p)
+    f0_xvec = np.arange(np.min(np.asarray(f0s_all)[needed]),np.max(np.asarray(f0s_all)[needed]),10)
+    dff_yvec = np.polyval(p,f0_xvec)
+    #ax_f0_std.plot(f0_xvec,dff_yvec,'k--')
+    ax_f0_std.plot(np.arange(0,1000,1),np.sqrt(np.arange(0,1000,1)),'k-')
     
     sns.stripplot(x =amplitudes_idx_all,y = amplitudes_all,color='black',edgecolor = None,ax = ax_amplitude,alpha = .6,size = 5)     #swarmplot   
+    sns.stripplot(x =amplitudes_idx_all,y = snrs_all,color='black',edgecolor = None,ax = ax_snr,alpha = .6,size = 5)     #swarmplot   
+    sns.stripplot(x =amplitudes_idx_all,y = f0s_all,color='black',edgecolor = None,ax = ax_f0,alpha = .6,size = 5)     #swarmplot   
+    sns.stripplot(x =amplitudes_idx_all,y = powers_all,color='black',edgecolor = None,ax = ax_power,alpha = .6,size = 5)     #swarmplot   
     sns.stripplot(x =amplitudes_idx_all,y = risetimes_all,color='black',ax = ax_risetime,alpha = .6,size = 5)    #swarmplot   
     sns.stripplot(x =amplitudes_idx_all,y = half_decay_times_all,color='black',ax = ax_half_decay_time,alpha = .6,size = 5)  #swarmplot   
     
     sns.boxplot(ax=ax_amplitude,    
                 x=amplitudes_idx_all, 
                 y=amplitudes_all, 
+                showfliers=False, 
+                linewidth=2,
+                width=.5,
+                palette = palettes)
+    sns.boxplot(ax=ax_snr,    
+                x=amplitudes_idx_all, 
+                y=snrs_all, 
+                showfliers=False, 
+                linewidth=2,
+                width=.5,
+                palette = palettes)
+    sns.boxplot(ax=ax_f0,    
+                x=amplitudes_idx_all, 
+                y=f0s_all, 
+                showfliers=False, 
+                linewidth=2,
+                width=.5,
+                palette = palettes)
+    sns.boxplot(ax=ax_power,    
+                x=amplitudes_idx_all, 
+                y=powers_all, 
                 showfliers=False, 
                 linewidth=2,
                 width=.5,
@@ -629,6 +790,19 @@ def plot_cell_wise_scatter_plots(ca_wave_parameters,ca_waves_dict,superresolutio
     ax_amplitude.set_xticklabels(ca_wave_parameters['sensors'])    
     ax_amplitude.set_ylabel('Amplitude (dF/F)')
     ax_amplitude.set_title('Calculated from single transients')
+    
+    ax_snr.set_xticks(np.arange(len(ca_wave_parameters['sensors'])))
+    ax_snr.set_xticklabels(ca_wave_parameters['sensors'])    
+    ax_snr.set_ylabel('SNR')
+    
+    ax_f0.set_xticks(np.arange(len(ca_wave_parameters['sensors'])))
+    ax_f0.set_xticklabels(ca_wave_parameters['sensors'])    
+    ax_f0.set_ylabel('F0 (pixel intensity)')
+    
+    ax_power.set_xticks(np.arange(len(ca_wave_parameters['sensors'])))
+    ax_power.set_xticklabels(ca_wave_parameters['sensors'])    
+    ax_power.set_ylabel('Imaging power (mW)')
+    
     ax_risetime.set_xticks(np.arange(len(ca_wave_parameters['sensors'])))
     ax_risetime.set_xticklabels(ca_wave_parameters['sensors'])  
     ax_risetime.set_ylabel('Time to peak (ms)')
@@ -730,6 +904,11 @@ def plot_cell_wise_scatter_plots(ca_wave_parameters,ca_waves_dict,superresolutio
     inkscape_cmd = ['/usr/bin/inkscape', '--file',figfile.format('svg'),'--export-emf', figfile.format('emf')]
     subprocess.run(inkscape_cmd )   
     json.dump(dict_out, open(os.path.join(plot_parameters['figures_dir'],plot_parameters['plot_name']+'.json'), 'w'), sort_keys=True, indent='\t', separators=(',', ': '))
+    
+    
+    #%%
+    
+    
        #%% 
 def plot_sample_traces(plot_parameters):
     sweeps = plot_parameters['sweeps']

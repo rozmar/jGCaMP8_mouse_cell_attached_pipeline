@@ -86,7 +86,8 @@ ca_wave_parameters = {'only_manually_labelled_movies':False,
                       'sensors': ['XCaMPgf','GCaMP7F','456','686','688'], # this determines the order of the sensors,#'XCaMPgf'
                       'ephys_recording_mode':'current clamp',#'voltage clamp',#
                       'minimum_f0_value':20, # when the neuropil is bright, the F0 can go negative after neuropil subtraction
-                      'min_channel_offset':100 # PMT error
+                      'min_channel_offset':100, # PMT error
+                      'blacklist':bad_cell_blacklist
                       }
 if leave_out_putative_interneurons:
     ca_wave_parameters['max_ap_peak_to_trough_time_median']=0.65
@@ -334,7 +335,8 @@ plot_properties = {'sensors':['456','686','688','GCaMP7F','XCaMPgf'],
 inclusion_criteria = {'max_sweep_ap_hw_std_per_median':.2,
                       'min_sweep_ap_snr_dv_median':10,
                       'minimum_f0_value':20, # when the neuropil is bright, the F0 can go negative after neuropil subtraction
-                      'min_channel_offset':100 # PMT error
+                      'min_channel_offset':100, # PMT error
+                      'blacklist':bad_cell_blacklist
                       }
 #%
 manuscript_figures_core.plot_stats(plot_properties,inclusion_criteria)
@@ -503,7 +505,8 @@ ca_wave_parameters = {'only_manually_labelled_movies':False,
                       'sensors': ['XCaMPgf','GCaMP7F','456','686','688'], # this determines the order of the sensors,#'XCaMPgf'
                       'ephys_recording_mode':'current clamp',
                       'minimum_f0_value':20, # when the neuropil is bright, the F0 can go negative after neuropil subtraction
-                      'min_channel_offset':100 # PMT error
+                      'min_channel_offset':100, # PMT error
+                      'blacklist':bad_cell_blacklist
                       }
 if leave_out_putative_interneurons:
     ca_wave_parameters['max_ap_peak_to_trough_time_median']=0.65
@@ -955,14 +958,16 @@ ca_wave_parameters = {'only_manually_labelled_movies':False,
                       'min_post_isi':.5,
                       'max_sweep_ap_hw_std_per_median':.2,
                       'min_sweep_ap_snr_dv_median':10,
-                      'gaussian_filter_sigma':5,#0,5,10,20,50
+                      'gaussian_filter_sigma':0,#0,5,10,20,50
                       'neuropil_subtraction':'0.8',#'none','0.7','calculated','0.8'
                       'neuropil_number':1,#0,1 # 0 is 2 pixel , 1 is 4 pixels left out around the cell
                       'sensors': ['456','686','688','GCaMP7F','XCaMPgf'], # this determines the order of the sensors,#'XCaMPgf'
                       'ephys_recording_mode':'current clamp',
                       'minimum_f0_value':20, # when the neuropil is bright, the F0 can go negative after neuropil subtraction
-                      'min_channel_offset':100 # PMT error
+                      'min_channel_offset':100, # PMT error
+                      'blacklist':bad_cell_blacklist
                       }
+
 if leave_out_putative_interneurons:
     ca_wave_parameters['max_ap_peak_to_trough_time_median']=0.65
     ca_wave_parameters['min_ap_ahp_amplitude_median']=.1
@@ -1004,6 +1009,7 @@ ca_waves_dict_pyr = utils_plot.collect_ca_wave_parameters(ca_wave_parameters,
                                                           ephys_properties_needed)
 
 
+#%%
 
 #% download sensor kinetics
 wave_parameters = {'ap_num_to_plot':1,#ap_num_to_plot
@@ -1054,6 +1060,7 @@ superresolution_traces_1ap_pyr_high_resolution = utils_plot.calculate_superresol
                                                                                                              ca_wave_parameters,
                                                                                                              superres_parameters)
 #%% grand averages
+figures_dir = '/home/rozmar/Data/GCaMP8_figs/'
 from plot import manuscript_figures_core
 plot_parameters={'sensor_colors':sensor_colors,
                  'sensors':ca_wave_parameters['sensors'],
@@ -1070,6 +1077,11 @@ plot_parameters={'sensor_colors':sensor_colors,
                  'yscalesize':10,
                  }
 manuscript_figures_core.plot_superresolution_grand_averages(superresolution_traces_1ap_pyr_low_resolution,plot_parameters)
+plot_parameters['sensors'] = ['456', '686', '688', 'GCaMP7F']
+plot_parameters['normalize_to_max'] = True
+#%%
+manuscript_figures_core.plot_rise_times_and_peak_selection(superresolution_traces_1ap_pyr_low_resolution,plot_parameters)
+#%%
 plot_parameters={'sensor_colors':sensor_colors,
                  'sensors':ca_wave_parameters['sensors'],
                  'start_time':-10,#-50, # ms
@@ -1323,6 +1335,7 @@ ca_wave_parameters = {'only_manually_labelled_movies':False,
                       'ephys_recording_mode':'current clamp',
                       'minimum_f0_value':20, # when the neuropil is bright, the F0 can go negative after neuropil subtraction
                       'min_channel_offset':100,
+                      'blacklist':bad_cell_blacklist
                       }
 if leave_out_putative_interneurons:
     ca_wave_parameters['max_ap_peak_to_trough_time_median']=0.65
@@ -1549,7 +1562,8 @@ ca_wave_parameters = {'only_manually_labelled_movies':False,
                       'sensors': ['GCaMP7F','XCaMPgf','456','686','688'], # this determines the order of the sensors
                       'ephys_recording_mode':'current clamp',
                       'minimum_f0_value':20, # when the neuropil is bright, the F0 can go negative after neuropil subtraction
-                      'min_channel_offset':100
+                      'min_channel_offset':100,
+                      'blacklist':bad_cell_blacklist
                       }
 if leave_out_putative_interneurons:
     ca_wave_parameters['max_ap_peak_to_trough_time_median']=0.65
@@ -1729,6 +1743,7 @@ ca_wave_parameters = {'only_manually_labelled_movies':False,
                       'ephys_recording_mode':'current clamp',
                       'minimum_f0_value':20, # when the neuropil is bright, the F0 can go negative after neuropil subtraction
                       'min_channel_offset':100,
+                      'blacklist':bad_cell_blacklist
                       }
 if leave_out_putative_interneurons:
     ca_wave_parameters['max_ap_peak_to_trough_time_median']=0.65
@@ -2207,6 +2222,7 @@ ca_wave_parameters = {'only_manually_labelled_movies':False,
                       'ephys_recording_mode':'current clamp',
                       'minimum_f0_value':20, # when the neuropil is bright, the F0 can go negative after neuropil subtraction
                       'min_channel_offset':100,
+                      'blacklist':bad_cell_blacklist
                       }
 if leave_out_putative_interneurons:
     ca_wave_parameters['max_ap_peak_to_trough_time_median']=0.65

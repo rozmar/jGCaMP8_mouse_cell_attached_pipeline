@@ -31,7 +31,240 @@ matplotlib.rcParams['font.sans-serif'] = ['Tahoma']
 # #%%
 # plt.plot(f0,std/f0,'ko',markersize = 1,alpha = .1)
 # =============================================================================
-#%% how does firing frequency change during a visual stim
+#%%
+min_event_number = 10
+sensors = ['456','686','688','GCaMP7F','XCaMPgf']
+fig_peak_amplitudes = plt.figure()
+ax_df=fig_peak_amplitudes.add_subplot(4,2,1)
+ax_df.set_ylabel('Peak amplitude (F)')
+ax_df_scatter=fig_peak_amplitudes.add_subplot(4,2,2)
+ax_df_scatter.set_ylabel('std(amplitude) (F)')
+ax_df_scatter.set_xlabel('mean(amplitude) (F)')
+ax_dff=fig_peak_amplitudes.add_subplot(4,2,3)
+ax_dff.set_ylabel('Peak amplitude (DF/F)')
+ax_dff_scatter=fig_peak_amplitudes.add_subplot(4,2,4)
+ax_dff_scatter.set_ylabel('std(amplitude) (DF/F)')
+ax_dff_scatter.set_xlabel('mean(amplitude) (DF/F)')
+ax_f0 = fig_peak_amplitudes.add_subplot(4,2,5)
+ax_f0.set_ylabel('baseline fluorescence (F)')
+# =============================================================================
+# ax_f0_scatter = fig_peak_amplitudes.add_subplot(3,2,6)
+# ax_f0_scatter.set_xlabel('baseline fluorescence (F)')
+# ax_f0_scatter.set_ylabel('std(amplitude (DF/F)')
+# =============================================================================
+ax_dprime  = fig_peak_amplitudes.add_subplot(4,2,7)
+ax_dprime.set_ylabel("d' (mean(DF)/std(DF))")
+ax_dprome_box = fig_peak_amplitudes.add_subplot(4,2,8)
+ax_dprome_box.set_ylabel("d' (mean(DF)/std(DF))")
+x_offset = 0
+amplitudes_idx_all = []
+dprime_all = []
+palettes = []
+for sensor_i,sensor in enumerate(sensors):
+    df_amplitude_mean_list = []
+    df_amplitude_std_list = []
+    dfperf_amplitude_mean_list = []
+    dfperf_amplitude_std_list = []
+    f0_list = []
+    for cell_i, cell in enumerate(ca_waves_dict_pyr[sensor]):
+        
+        needed_events = cell['ap_group_ap_num'] == 1
+        if np.sum(needed_events)<min_event_number:
+            continue
+        df_amplitude_mean_list.append(np.mean(cell['cawave_peak_amplitude_f'][needed_events]))
+        df_amplitude_std_list.append(np.std(cell['cawave_peak_amplitude_f'][needed_events]))
+        dfperf_amplitude_mean_list.append(np.mean(cell['cawave_peak_amplitude_dff'][needed_events]))
+        dfperf_amplitude_std_list.append(np.std(cell['cawave_peak_amplitude_dff'][needed_events]))
+        f0_list.append(np.mean(cell['cawave_baseline_f'][needed_events]))
+        amplitudes_idx_all.append(sensor_i)
+    palettes.append(sensor_colors['boxplot'][sensor])
+    dprime = np.asarray(df_amplitude_mean_list)/np.asarray(df_amplitude_std_list)
+    dprime_all.append(dprime)
+    order = np.argsort(dprime)
+    #order = np.argsort(np.asarray(dfperf_amplitude_mean_list)-np.asarray(dfperf_amplitude_std_list))
+    ax_df.errorbar(np.arange(len(order))+x_offset,np.asarray(df_amplitude_mean_list)[order],np.asarray(df_amplitude_std_list)[order],fmt = 'o',color = sensor_colors[sensor],markerfacecolor = sensor_colors[sensor])
+    ax_df_scatter.plot(df_amplitude_mean_list,df_amplitude_std_list,'o',color = sensor_colors[sensor])
+    
+    ax_dff.errorbar(np.arange(len(order))+x_offset,np.asarray(dfperf_amplitude_mean_list)[order],np.asarray(dfperf_amplitude_std_list)[order],fmt = 'o',color = sensor_colors[sensor],markerfacecolor = sensor_colors[sensor])
+    ax_dff_scatter.plot(dfperf_amplitude_mean_list,dfperf_amplitude_std_list,'o',color = sensor_colors[sensor])
+    
+    ax_f0.plot(np.arange(len(order))+x_offset,np.asarray(f0_list)[order],'o',color = sensor_colors[sensor])
+    #ax_f0_scatter.plot(f0_list,np.asarray(dfperf_amplitude_mean_list)/np.mean(dfperf_amplitude_mean_list),'o',color = sensor_colors[sensor])
+    #ax_f0_scatter.plot(f0_list,dfperf_amplitude_std_list,'o',color = sensor_colors[sensor])
+   #ax_f0_scatter.errorbar(f0_list,np.asarray(dfperf_amplitude_mean_list)[order],np.asarray(dfperf_amplitude_std_list)[order],fmt = 'o',color = sensor_colors[sensor],markerfacecolor = sensor_colors[sensor])
+   
+    
+    ax_dprime.plot(np.arange(len(order))+x_offset,np.asarray(dprime)[order],'o',color = sensor_colors[sensor])
+    x_offset+= len(order)
+    
+dprime_all = np.concatenate(dprime_all)   
+sns.stripplot(x =amplitudes_idx_all,y = dprime_all,color='black',ax = ax_dprome_box,alpha = .6,size = 5)  #swarmplot   
+
+sns.boxplot(ax=ax_dprome_box,    
+            x=amplitudes_idx_all, 
+            y=dprime_all, 
+            showfliers=False, 
+            linewidth=2,
+            width=.5,
+            palette = palettes)
+ax_dprome_box.set_xticks(np.arange(len(sensors)))
+ax_dprome_box.set_xticklabels(sensors)  
+#%%
+def estimate_statistics(values,function = 'std',bootstrapping = False):
+    """
+    function to estimate standard deviation
+
+    Parameters
+    ----------
+    values : array of float
+    function: str - std or mean
+    bootstrapping: set true to do bootstrapping to estimate the stats
+        .
+
+    Returns
+    -------
+    output : estimate
+    ci : 2x1, confidence interval
+
+    """
+    if function == 'std':
+        if bootstrapping:
+            bs = np.random.choice(values, (len(values), 100), replace=True)
+            bs_stds = bs.std(axis=0)
+            output = bs_stds.mean()
+            ci = [np.quantile(bs_stds, 0.05),np.quantile(bs_stds, 0.95)]
+        else:
+            output = np.std(values)
+            ci = None
+    elif function == 'mean':
+        if bootstrapping:
+            bs = np.random.choice(values, (len(values), 100), replace=True)
+            bs_means = bs.mean(axis=0)
+            output = bs_means.mean()
+            ci = [np.quantile(bs_means, 0.05),np.quantile(bs_means, 0.95)]
+        else:
+            output = np.mean(values)
+            ci = None
+    return output, ci
+
+def test_stat_estimate(sample_num = 5, runs = 100,function = 'std',bootstrapping = False):
+    """
+    Parameters
+    ----------
+    sample_num : int, optional
+        DESCRIPTION. Number of random samples to generate. The default is 5.
+    runs : int, optional
+        Number of runs to generate statistics of the estimate. The default is 100.
+    function : str, either std or mean
+        Function that should be tested
+    bootstrapping:
+        if the function should be bootstrapped or not
+
+    Returns
+    -------
+    error_mean : float
+        mean normalized error  0 = no error, 1 = error is the same magnitude as value
+    error_std : float 
+        std of normalized error
+
+    """
+    if function == 'std':
+        expected_value = 10
+    elif function == 'mean':
+        expected_value = 100
+
+    error_list = []
+    ci_list_lower = []
+    ci_list_upper = []
+    for i in range(runs):
+        rnd_vals = np.random.poisson(100,sample_num)
+        #rnd_vals = np.random.normal(1000,5000,sample_num)
+        std_est,ci = estimate_statistics(rnd_vals,function,bootstrapping)
+        error_list.append(np.abs(std_est-expected_value))
+        if bootstrapping:
+            ci_list_lower.append(ci[0]/expected_value)
+            ci_list_upper.append(ci[1]/expected_value)
+    error_percentage = np.asarray(error_list)/expected_value
+    error_mean = np.mean(error_percentage)
+    error_std = np.std(error_percentage)
+    if bootstrapping:
+        ci_mean = [np.mean(ci_list_lower),np.mean(ci_list_upper)]
+        ci_std = [np.std(ci_list_lower),np.std(ci_list_upper)]
+    else:
+        ci_mean = ci_std = None
+    return error_mean, error_std, ci_mean, ci_std
+
+
+
+def plot_std_mean_estimate_errors(sample_nums = np.arange(5,55,5)):
+    std_error_mean_list = []
+    std_error_std_list = []
+    std_error_mean_boot_list = []
+    std_error_std_boot_list = []
+    
+    mean_error_mean_list = []
+    mean_error_std_list = []
+    mean_error_mean_boot_list = []
+    mean_error_std_boot_list = []
+    
+    
+    mean_ci_mean_boot_list = []
+    mean_ci_std_boot_list = []
+    
+    std_ci_mean_boot_list = []
+    std_ci_std_boot_list = []
+    
+    for sample_num in sample_nums:
+        error_mean, error_std, ci_mean, ci_std = test_stat_estimate(sample_num=sample_num,runs = 1000,function = 'std',bootstrapping =False)
+        std_error_mean_list.append(error_mean)
+        std_error_std_list.append(error_std)
+        error_mean, error_std, ci_mean, ci_std = test_stat_estimate(sample_num=sample_num,runs = 1000 ,function = 'std',bootstrapping =True)
+        std_error_mean_boot_list.append(error_mean)
+        std_error_std_boot_list.append(error_std)
+        std_ci_mean_boot_list.append(ci_mean)
+        std_ci_std_boot_list.append(ci_std)
+        
+        error_mean, error_std, ci_mean, ci_std = test_stat_estimate(sample_num=sample_num,runs = 1000,function = 'mean',bootstrapping =False)
+        mean_error_mean_list.append(error_mean)
+        mean_error_std_list.append(error_std)
+        error_mean, error_std, ci_mean, ci_std = test_stat_estimate(sample_num=sample_num,runs = 1000 ,function = 'mean',bootstrapping =True)
+        mean_error_mean_boot_list.append(error_mean)
+        mean_error_std_boot_list.append(error_std)
+        mean_ci_mean_boot_list.append(ci_mean)
+        mean_ci_std_boot_list.append(ci_std)
+        
+    #%
+    fig_std_estimation = plt.figure()
+    ax_original = fig_std_estimation.add_subplot(2,2,1)
+    ax_original.errorbar(sample_nums,std_error_mean_list,std_error_std_list,fmt='o-',label = 'numpy.std()', alpha = .8)
+    ax_original.errorbar(sample_nums,std_error_mean_boot_list,std_error_std_boot_list,fmt='o-',label = 'bootstrapped', alpha = .8)
+    ax_original.set_title('Standard deviation')
+    ax_original.set_ylabel('normalized error in estimating std')
+    ax_original.set_xlabel('sample size')
+    ax_original.legend()
+    
+    ax_mean = fig_std_estimation.add_subplot(2,2,2)
+    ax_mean.errorbar(sample_nums,mean_error_mean_list,mean_error_std_list,fmt='o-',label = 'numpy.mean()')
+    ax_mean.errorbar(sample_nums,mean_error_mean_boot_list,mean_error_std_boot_list,fmt='o-',label = 'bootstrapped')
+    ax_mean.set_title('Mean')
+    ax_mean.set_ylabel('normalized error in estimating mean')
+    ax_mean.set_xlabel('sample size')
+    ax_mean.legend()
+    
+    ax_std_ci = fig_std_estimation.add_subplot(2,2,3)
+    ax_std_ci.errorbar(sample_nums,np.asarray(std_ci_mean_boot_list)[:,0],np.asarray(std_ci_std_boot_list)[:,0],fmt='o-')
+    ax_std_ci.errorbar(sample_nums,np.asarray(std_ci_mean_boot_list)[:,1],np.asarray(std_ci_std_boot_list)[:,1],fmt='o-')
+    ax_std_ci.set_ylabel('normalized confidence interval')
+    ax_std_ci.set_xlabel('sample size')
+    
+    ax_std_ci = fig_std_estimation.add_subplot(2,2,4)
+    ax_std_ci.errorbar(sample_nums,np.asarray(mean_ci_mean_boot_list)[:,0],np.asarray(mean_ci_std_boot_list)[:,0],fmt='o-')
+    ax_std_ci.errorbar(sample_nums,np.asarray(mean_ci_mean_boot_list)[:,1],np.asarray(mean_ci_std_boot_list)[:,1],fmt='o-')
+    ax_std_ci.set_ylabel('normalized confidence interval')
+    ax_std_ci.set_xlabel('sample size')
+
+plot_std_mean_estimate_errors(sample_nums = np.arange(5,55,5))
+#%% how does firing frequency change during a visual stim - not at all
 from scipy.stats import wilcoxon
 quality_key= {'max_sweep_ap_hw_std_per_median': .2,
               'min_sweep_ap_snr_dv_median' : 10}
@@ -357,7 +590,7 @@ import matplotlib.colors as colors
 #noisedir = '/home/rozmar/Data/Calcium_imaging/raw/DOM3-MMIMS/2021-02-14-fluorescent_slide'   
 #noisedir = '/home/rozmar/Data/Calcium_imaging/raw/Genie_2P_rig/20210214-fluorescent_slide'  
 #noisedir = '/home/rozmar/Data/Calcium_imaging/raw/DOM3-MMIMS/2021-02-22-noise'   
-noisedir = '/home/rozmar/Data/Calcium_imaging/raw/DOM3-MMIMS/2021-02-26-fluorescent_slide'   
+noisedir = '/home/rozmar/Network/Gsuite/mr_share_1/Data/Calcium_imaging/raw/DOM3-MMIMS/2021-02-26-fluorescent_slide'   
 #noisedir = '/home/rozmar/Data/Calcium_imaging/raw/DOM3-MMIMS/2021-02-26-fluorescent_slide/no_binning'
 files = os.listdir(noisedir)
 files_real = list()

@@ -6,8 +6,11 @@ import numpy as np
 from suite2p import default_ops as s2p_default_ops
 from suite2p import run_s2p
 from suite2p import classification
-from suite2p.detection.masks import create_neuropil_masks, create_cell_pix, create_cell_mask
-from suite2p.extraction.extract import extract_traces
+try:
+    from suite2p.detection.masks import create_neuropil_masks, create_cell_pix, create_cell_mask
+    from suite2p.extraction.extract import extract_traces
+except:
+    print('wrong s2p version, skipping some functions')
 import shutil
 import time
 import datetime

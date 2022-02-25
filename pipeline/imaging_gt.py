@@ -614,6 +614,14 @@ class IngestCalciumWave(dj.Computed):
     cawave_complete : int #1
     """
     def make(self, key):
+        
+        rise_time_dict = {'GCaMP7F':15.5,
+                          'XCaMPgf':23,
+                          '456':4,
+                          '686':5,
+                          '688':8.5,
+                              }
+        
         max_neuropil_num = 3 # only neuropil 0 and 1 are needed right now..
         max_channel_num = 1 # only channel 1
         neuropil_correlation_min_corr_coeff=.5
@@ -640,6 +648,7 @@ class IngestCalciumWave(dj.Computed):
             sweep_start_time = (ephys_cell_attached.Sweep&groundtruth_roi).fetch1('sweep_start_time')
             sweep_timeoffset = (cell_start_time -session_start_time).total_seconds()
             sweep_start_time = float(sweep_start_time)+sweep_timeoffset
+            session_calcium_sensor = (SessionCalciumSensor()&groundtruth_roi).fetch1('session_calcium_sensor')
             roi_timeoffset = (imaging.ROI()&groundtruth_roi).fetch1('roi_time_offset')
             frame_times = (imaging.MovieFrameTimes()&groundtruth_roi).fetch1('frame_times') + roi_timeoffset
             framerate = 1/np.median(np.diff(frame_times))
@@ -736,11 +745,14 @@ class IngestCalciumWave(dj.Computed):
                                 cawave_f_now = np.ones(len(ophys_time))*np.nan
                                 cawave_f_now[idxs_valid] = F_subtracted[idxs[idxs_valid]]
                                 #%
-                                if max_rise_time+ap_group_length>cawave_time[-1]/1000:
-                                    end_idx = len(cawave_time)
-                                else:
-                                    end_idx =np.argmax(max_rise_time+ap_group_length<cawave_time/1000)
-                                peak_amplitude_idx = np.argmax(cawave_f_now[ca_wave_step_back:end_idx])+ca_wave_step_back
+# =============================================================================
+#                                 if max_rise_time+ap_group_length>cawave_time[-1]/1000:
+#                                     end_idx = len(cawave_time)
+#                                 else:
+#                                     end_idx =np.argmax(max_rise_time+ap_group_length<cawave_time/1000)
+#                                 peak_amplitude_idx = np.argmax(cawave_f_now[ca_wave_step_back:end_idx])+ca_wave_step_back
+# =============================================================================
+                                peak_amplitude_idx_start = np.argmax(cawave_time>rise_time_dict[session_calcium_sensor])
                                 #%
                                 baseline_step_num = ca_wave_step_back - int((gaussian_filter_sigma*4)/1000)
                                 baseline_step_start = ca_wave_step_back-ca_wave_step_back_for_baseline- int((gaussian_filter_sigma*4)/1000)
@@ -748,13 +760,13 @@ class IngestCalciumWave(dj.Computed):
                                 ca_wave_properties_now['cawave_baseline_f'] = np.nanmean(cawave_f_now[baseline_step_start:baseline_step_num])
                                 ca_wave_properties_now['cawave_baseline_f_std'] = np.nanstd(cawave_f_now[baseline_step_start:baseline_step_num])
                                 ca_wave_properties_now['cawave_baseline_dff_global'] = (ca_wave_properties_now['cawave_baseline_f']-F0_gobal)/F0_gobal
-                                ca_wave_properties_now['cawave_peak_amplitude_f'] = cawave_f_now[peak_amplitude_idx]-ca_wave_properties_now['cawave_baseline_f']
+                                ca_wave_properties_now['cawave_peak_amplitude_f'] = np.mean(cawave_f_now[peak_amplitude_idx_start:peak_amplitude_idx_start+3])-ca_wave_properties_now['cawave_baseline_f']
                                 ca_wave_properties_now['cawave_peak_amplitude_dff'] = ca_wave_properties_now['cawave_peak_amplitude_f']/ca_wave_properties_now['cawave_baseline_f']
-                                ca_wave_properties_now['cawave_rise_time'] = cawave_time[peak_amplitude_idx]
+                                ca_wave_properties_now['cawave_rise_time'] = cawave_time[peak_amplitude_idx_start]
                                 ca_wave_properties_now['cawave_snr'] = ca_wave_properties_now['cawave_peak_amplitude_f']/ca_wave_properties_now['cawave_baseline_f_std']
                                 
                                 cawave_f_now_normalized = (cawave_f_now-ca_wave_properties_now['cawave_baseline_f'])/ca_wave_properties_now['cawave_peak_amplitude_f']
-                                half_decay_time_idx = np.argmax(cawave_f_now_normalized[peak_amplitude_idx:]<.5)+peak_amplitude_idx
+                                half_decay_time_idx = np.argmax(cawave_f_now_normalized[peak_amplitude_idx_start+1:]<.5)+peak_amplitude_idx_start+1
                                 ca_wave_properties_now['cawave_half_decay_time'] = cawave_time[half_decay_time_idx]-ca_wave_properties_now['cawave_rise_time']
                                 
                                 calcium_wave_properties_list.append(ca_wave_properties_now)

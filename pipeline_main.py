@@ -2,7 +2,7 @@ import numpy as np
 import utils.utils_pipeline as utils_pipeline
 import notebook_google.notebook_main as online_notebook
 from pipeline.ingest import datapipeline_metadata,datapipeline_elphys,datapipeline_imaging,datapipeline_imaging_gt, datapipeline_behavior
-#%% set parameters
+#% set parameters
 
 s2p_params = {'cell_soma_size':20, # microns - obsolete
               'max_reg_shift':20, # microns
@@ -46,6 +46,7 @@ datapipeline_imaging.upload_movie_registration_scanimage()
 #% ROIs and corresponding metadata
 datapipeline_imaging.upload_ROIs_scanimage() # using only scanimage files
 datapipeline_imaging_gt.upload_ground_truth_ROIs_and_notes() # using the metadata from google drive in csv files
+#%%
 datapipeline_imaging_gt.populatemytables(paralel = True, cores = 12)
 #% 
 datapipeline_elphys.populatemytables(paralel = True, cores = 12)

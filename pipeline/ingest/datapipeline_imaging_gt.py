@@ -56,11 +56,10 @@ def populatemytables_core(arguments,runround):
         imaging_gt.CellMovieDynamicRange().populate(**arguments)
         
     elif runround == 2:
-        imaging_gt.LFPNeuropilCorrelation().populate(**arguments)
-        imaging_gt.SessionROIFDistribution().populate(**arguments)
         imaging_gt.IngestCalciumWave().populate(**arguments)
         imaging_gt.IngestDoubletCalciumWave().populate(**arguments)
-        
+        imaging_gt.LFPNeuropilCorrelation().populate(**arguments)
+        imaging_gt.SessionROIFDistribution().populate(**arguments)
     elif runround == 3:
         imaging_gt.MovieCalciumWaveSNR().populate(**arguments)
         imaging_gt.CellBaselineFluorescence().populate(**arguments)

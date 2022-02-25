@@ -14,7 +14,10 @@ dj.conn()
 from pipeline import pipeline_tools
 from pipeline import lab, experiment, imaging, ephys_cell_attached, ephysanal_cell_attached, imaging_gt
 from utils.utils_pipeline import extract_scanimage_metadata, extract_files_from_dir
-from suite2p.detection.masks import create_neuropil_masks, create_cell_pix
+try:
+    from suite2p.detection.masks import create_neuropil_masks, create_cell_pix
+except:
+    print('wrong s2p version, skipping functions')
 #import ray
 import time
 

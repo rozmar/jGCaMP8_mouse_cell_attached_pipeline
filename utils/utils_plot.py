@@ -221,6 +221,9 @@ def collect_ca_wave_parameters(ca_wave_parameters,cawave_properties_needed,ephys
         cawaves_all = ephysanal_cell_attached.CellMeanFiringRate()*imaging.MovieChannel()*imaging_gt.SessionROIFPercentile()*ephysanal_cell_attached.SweepAPQC()*ephysanal_cell_attached.CellSpikeParameters()*imaging_gt.ROIDwellTime()*imaging.ROI()*imaging.MoviePowerPostObjective()*imaging.MovieMetaData()*imaging.MovieNote()*imaging_gt.SessionCalciumSensor()*ephysanal_cell_attached.APGroup()*imaging_gt.CalciumWave.CalciumWaveProperties()*imaging_gt.CalciumWave()*imaging_gt.CalciumWave.CalciumWaveNeuropil()&'movie_note_type = "quality"'
         cellwave_by_cell_list = list()
         for cellkey in ephys_cell_attached.Cell():
+            sensor_cell_name = 'anm{}_cell{}'.format(cellkey['subject_id'],cellkey['cell_number'])
+            if sensor_cell_name in ca_wave_parameters['blacklist']:
+                continue
 # =============================================================================
 #             cell_ephys_data = dict()
 #             ephys_properties_list = (ephysanal_cell_attached.CellSpikeParameters()&cellkey).fetch(*ephys_properties_needed)

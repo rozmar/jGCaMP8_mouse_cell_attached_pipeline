@@ -336,8 +336,8 @@ def NWB_movie_path_and_cell_description_export():
     save_registered_movies = True
     overwrite_nwb = False
     save_movies_as_tif = True
-    savedir = '/home/rozmar/Mount/HDD_ext_1_4TB/000168'#'/home/rozmar/Data/Calcium_imaging/GCaMP8_NWB'#
-    registered_movie_dir = '/home/rozmar/Mount/HDD_ext_2_4TB/GCaMP8_movies'
+    savedir = '/media/rozmar/HDD_RAID_16TB_4/GCaMP8_NWB/DANDI/000168_v3'#'/home/rozmar/Data/Calcium_imaging/GCaMP8_NWB'#
+    registered_movie_dir = '/media/rozmar/HDD_RAID_16TB_3/GCaMP8_NWB/movie_registered/'
     nwb_output_dir = savedir
     
     zero_zero_time = datetime.strptime('00:00:00', '%H:%M:%S').time()  # no precise time available
