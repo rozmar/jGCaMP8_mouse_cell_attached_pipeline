@@ -615,7 +615,7 @@ class IngestCalciumWave(dj.Computed):
     """
     def make(self, key):
         
-        rise_time_dict = {'GCaMP7F':15.5,
+        rise_time_dict = {'GCaMP7F':23,
                           'XCaMPgf':23,
                           '456':4,
                           '686':5,
@@ -654,6 +654,7 @@ class IngestCalciumWave(dj.Computed):
             framerate = 1/np.median(np.diff(frame_times))
             ca_wave_step_back = int(ca_wave_time_back*framerate)
             ca_wave_step_back_for_baseline = int(ca_wave_time_back_for_baseline*framerate)
+            ca_wave_step_back_for_baseline_amplitude = 3
             ca_wave_step_forward =int(ca_wave_time_forward*framerate)
             global_f0_step = int(global_f0_time*framerate)
             ophys_time = np.arange(-ca_wave_step_back,ca_wave_step_forward)/framerate*1000
@@ -756,8 +757,9 @@ class IngestCalciumWave(dj.Computed):
                                 #%
                                 baseline_step_num = ca_wave_step_back - int((gaussian_filter_sigma*4)/1000)
                                 baseline_step_start = ca_wave_step_back-ca_wave_step_back_for_baseline- int((gaussian_filter_sigma*4)/1000)
+                                baseline_step_start_amplitude = ca_wave_step_back-ca_wave_step_back_for_baseline_amplitude- int((gaussian_filter_sigma*4)/1000) 
                                 ca_wave_properties_now['cawave_rneu'] =r_neu
-                                ca_wave_properties_now['cawave_baseline_f'] = np.nanmean(cawave_f_now[baseline_step_start:baseline_step_num])
+                                ca_wave_properties_now['cawave_baseline_f'] = np.nanmean(cawave_f_now[baseline_step_start_amplitude:baseline_step_num])
                                 ca_wave_properties_now['cawave_baseline_f_std'] = np.nanstd(cawave_f_now[baseline_step_start:baseline_step_num])
                                 ca_wave_properties_now['cawave_baseline_dff_global'] = (ca_wave_properties_now['cawave_baseline_f']-F0_gobal)/F0_gobal
                                 ca_wave_properties_now['cawave_peak_amplitude_f'] = np.mean(cawave_f_now[peak_amplitude_idx_start:peak_amplitude_idx_start+3])-ca_wave_properties_now['cawave_baseline_f']

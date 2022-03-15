@@ -65,7 +65,8 @@ for sensor_i,sensor in enumerate(sensors):
     df_amplitude_std_list = []
     dfperf_amplitude_mean_list = []
     dfperf_amplitude_std_list = []
-    f0_list = []
+    f0_mean_list = []
+    f0_std_list = []
     for cell_i, cell in enumerate(ca_waves_dict_pyr[sensor]):
         
         needed_events = cell['ap_group_ap_num'] == 1
@@ -75,7 +76,8 @@ for sensor_i,sensor in enumerate(sensors):
         df_amplitude_std_list.append(np.std(cell['cawave_peak_amplitude_f'][needed_events]))
         dfperf_amplitude_mean_list.append(np.mean(cell['cawave_peak_amplitude_dff'][needed_events]))
         dfperf_amplitude_std_list.append(np.std(cell['cawave_peak_amplitude_dff'][needed_events]))
-        f0_list.append(np.mean(cell['cawave_baseline_f'][needed_events]))
+        f0_mean_list.append(np.mean(cell['cawave_baseline_f'][needed_events]))
+        f0_std_list.append(np.mean(cell['cawave_baseline_f'][needed_events]))
         amplitudes_idx_all.append(sensor_i)
     palettes.append(sensor_colors['boxplot'][sensor])
     dprime = np.asarray(df_amplitude_mean_list)/np.asarray(df_amplitude_std_list)
@@ -88,7 +90,8 @@ for sensor_i,sensor in enumerate(sensors):
     ax_dff.errorbar(np.arange(len(order))+x_offset,np.asarray(dfperf_amplitude_mean_list)[order],np.asarray(dfperf_amplitude_std_list)[order],fmt = 'o',color = sensor_colors[sensor],markerfacecolor = sensor_colors[sensor])
     ax_dff_scatter.plot(dfperf_amplitude_mean_list,dfperf_amplitude_std_list,'o',color = sensor_colors[sensor])
     
-    ax_f0.plot(np.arange(len(order))+x_offset,np.asarray(f0_list)[order],'o',color = sensor_colors[sensor])
+    #ax_f0.plot(np.arange(len(order))+x_offset,np.asarray(f0_list)[order],'o',color = sensor_colors[sensor])
+    ax_f0.errorbar(np.arange(len(order))+x_offset,np.asarray(f0_mean_list)[order],np.asarray(f0_std_list)[order],fmt = 'o',color = sensor_colors[sensor],markerfacecolor = sensor_colors[sensor])
     #ax_f0_scatter.plot(f0_list,np.asarray(dfperf_amplitude_mean_list)/np.mean(dfperf_amplitude_mean_list),'o',color = sensor_colors[sensor])
     #ax_f0_scatter.plot(f0_list,dfperf_amplitude_std_list,'o',color = sensor_colors[sensor])
    #ax_f0_scatter.errorbar(f0_list,np.asarray(dfperf_amplitude_mean_list)[order],np.asarray(dfperf_amplitude_std_list)[order],fmt = 'o',color = sensor_colors[sensor],markerfacecolor = sensor_colors[sensor])
